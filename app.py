@@ -4,104 +4,116 @@ import zipfile
 import streamlit as st
 import json
 
-# Streamlit Cloud fallback (Eğer .env yoksa Streamlit Secrets'dan okur)
-try:
-    if "ZAI_API_KEY" not in os.environ:
-        os.environ["ZAI_API_KEY"] = st.secrets["ZAI_API_KEY"]
-        os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
-        os.environ["TRIPO_API_KEY"] = st.secrets["TRIPO_API_KEY"]
-except:
-    pass
-
+# FOSTAS Core'u çağırıyoruz (Anahtar işlerini o kendi içinde halleder)
 from fostas_brain import FOSTASCore
 
 st.set_page_config(page_title="FOSTAS OS - AI Game Studio", page_icon="🎮", layout="wide")
 
-# CSS
+# CSS Dark IDE Theme
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
-    .stTextArea textarea { background-color: #1a1a1a; color: #ffffff; border: 1px solid #444; }
+    .stTextArea textarea { background-color: #1e1e1e; color: #d4d4d4; font-family: monospace; border: 1px solid #444; }
     h1, h2, h3 { color: #ff4b4b; }
-    .sidebar .sidebar-content { background-color: #171717; }
+    .stButton button { background-color: #2d2d2d; color: white; border: 1px solid #444; }
     .stDownloadButton button { background-color: #ff4b4b; color: white; border: none; }
-    .stDownloadButton button:hover { background-color: #ff0000; color: white; }
+    .stSelectbox > div > div { background-color: #1e1e1e; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
 # Init Core
 if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
+if 'selected_file' not in st.session_state:
+    st.session_state.selected_file = None
 
-# Sidebar
+fostas = st.session_state.fostas
+
+# Sidebar - File Explorer & Asset Registry
 with st.sidebar:
     st.header("📁 FOSTAS Workspace")
-    fostas = st.session_state.fostas
     
-    st.subheader("📜 Scripts")
-    if fostas.project_memory["scripts"]:
-        for script_name in fostas.project_memory["scripts"].keys():
-            st.code(script_name, language="python")
-    else:
-        st.write("Henüz script yok.")
+    # File Explorer (Scripts & Scenes)
+    all_files = list(fostas.project_memory["scripts"].keys()) + list(fostas.project_memory["scenes"].keys())
+    
+    if all_files:
+        selected = st.selectbox("📂 Open File", all_files)
+        st.session_state.selected_file = selected
         
-    st.subheader("🌍 Scenes")
-    if fostas.project_memory["scenes"]:
-        for scene_name in fostas.project_memory["scenes"].keys():
-            st.code(scene_name, language="xml")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("↩️ Undo", use_container_width=True):
+                if fostas.undo_last_version(selected):
+                    st.success("Reverted to previous version!")
+                    st.rerun()
+                else:
+                    st.warning("No previous version to undo.")
     else:
-        st.write("Henüz sahne yok.")
+        st.write("Henüz dosya yok.")
         
-    st.subheader("🎨 Asset Registry")
+    st.markdown("---")
+    st.subheader("🎨 3D Asset Registry")
     if fostas.project_memory["assets"]:
         for asset in fostas.project_memory["assets"]:
-            st.write(f"✅ {asset['name']}")
+            status = "✅ Downloaded" if asset.get("data") else "⏳ Pending"
+            st.write(f"{status} - {asset['name']}")
     else:
         st.write("Henüz 3D model yok.")
 
     st.markdown("---")
     st.subheader("📦 Export Project")
     
-    # ZIP İndirme Mantığı
-    if fostas.project_memory["scripts"] or fostas.project_memory["scenes"]:
-        # Hafızadaki dosyaları byte olarak ZIP'e yazma
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-            for file_path, content in fostas.project_memory["scripts"].items():
-                zip_file.writestr(file_path, content)
-            for file_path, content in fostas.project_memory["scenes"].items():
-                zip_file.writestr(file_path, content)
+    # ZIP İndirme Mantığı (Geliştirilmiş)
+    if all_files or fostas.project_memory["assets"]:
+        if st.button("⬇️ Prepare Godot Project ZIP", use_container_width=True):
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+                # Scriptleri ekle
+                for path, versions in fostas.project_memory["scripts"].items():
+                    latest_code = versions[-1]["code"]
+                    zip_file.writestr(path, latest_code)
                 
-            # Godot project.godot dosyasını otomatik oluşturma
-            godot_project = """config_version=5
+                # Sahneleri ekle
+                for path, versions in fostas.project_memory["scenes"].items():
+                    latest_code = versions[-1]["code"]
+                    zip_file.writestr(path, latest_code)
+                
+                # 3D Modelleri binary olarak ekle
+                for asset in fostas.project_memory["assets"]:
+                    if asset.get("data"):
+                        # path: "res://assets/fly.glb" -> "assets/fly.glb"
+                        clean_path = asset["path"].replace("res://", "")
+                        zip_file.writestr(clean_path, asset["data"])
+                
+                # Godot project.godot
+                godot_project = """config_version=5
 [application]
-config/name="FOSTAS OS Generated Project"
+config/name="FOSTAS OS Project"
 run/main_scene="res://scenes/main.tscn"
 """
-            zip_file.writestr("project.godot", godot_project)
+                zip_file.writestr("project.godot", godot_project)
+                
+            zip_buffer.seek(0)
+            
+            st.download_button(
+                label="⬇️ Download .zip",
+                data=zip_buffer,
+                file_name="fostas_project.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
 
-        zip_buffer.seek(0)
-        
-        st.download_button(
-            label="⬇️ Download Godot Project (.zip)",
-            data=zip_buffer,
-            file_name="fostas_godot_project.zip",
-            mime="application/zip",
-            use_container_width=True
-        )
-    else:
-        st.warning("Indirmek için önce kod üret!")
-
-# Main Dashboard
+# Main Dashboard - IDE Area
 st.title("🎮 FOSTAS OS")
 st.subheader("The AI Operating System for AAA Game Development")
 st.markdown("---")
 
+# Prompt Input
 st.header("🚀 Describe your game system")
 user_prompt = st.text_area(
     "Prompt Input:", 
-    height=150, 
-    placeholder="Örn: Tarkov tarzı kanama ve kırık kemik sistemi içeren bir combat system oluştur. Ayrıca asker NPC için 3D model üret."
+    height=100, 
+    placeholder="Örn: Düşman için fly_ai.gd ve sahne dosyası oluştur. Ayrıca 3D sinek modeli üret."
 )
 
 if st.button("⚡ Run FOSTAS Pipeline", type="primary", use_container_width=True):
@@ -114,20 +126,35 @@ if st.button("⚡ Run FOSTAS Pipeline", type="primary", use_container_width=True
             output_container.markdown(full_output)
             
         st.balloons()
-        st.success("Pipeline Completed! Files are ready to download from the sidebar.")
+        st.success("Pipeline Completed! Check the Workspace sidebar to view files.")
     else:
         st.warning("Lütfen bir prompt gir.")
 
+# Code Editor Area
 st.markdown("---")
-st.header("📊 FOSTAS Agents Activity")
-col1, col2 = st.columns(2)
+st.header("💻 Code Editor (IDE)")
 
-with col1:
-    st.subheader("🧠 AI Agents Status")
-    st.write("✅ **Z.AI (Coder):** Active (Bug Hunter Enabled)")
-    st.write("✅ **Gemini (Planner):** Active (Prompt Analyzer Enabled)")
-    st.write("✅ **Tripo (3D Artist):** Active (Asset Registry Enabled)")
+if st.session_state.selected_file:
+    selected = st.session_state.selected_file
+    
+    # Dosya türüne göre kodu getir
+    if selected.endswith(".gd") and selected in fostas.project_memory["scripts"]:
+        code_data = fostas.project_memory["scripts"][selected][-1]["code"]
+    elif selected.endswith(".tscn") and selected in fostas.project_memory["scenes"]:
+        code_data = fostas.project_memory["scenes"][selected][-1]["code"]
+    else:
+        code_data = "# File not found"
 
-with col2:
-    st.subheader("🛠️ Project Knowledge Base (RAG)")
-    st.json(fostas.project_memory["docs"])
+    edited_code = st.text_area(f"Editing: {selected}", value=code_data, height=400, key="code_editor")
+    
+    if st.button("💾 Save Changes to Memory"):
+        if selected.endswith(".gd"):
+            v_num = len(fostas.project_memory["scripts"][selected]) + 1
+            fostas.project_memory["scripts"][selected].append({"v": v_num, "code": edited_code})
+        elif selected.endswith(".tscn"):
+            v_num = len(fostas.project_memory["scenes"][selected]) + 1
+            fostas.project_memory["scenes"][selected].append({"v": v_num, "code": edited_code})
+        st.success(f"Saved {selected} as version {v_num}!")
+        st.rerun()
+else:
+    st.info("Select a file from the Workspace sidebar to view or edit code.")
