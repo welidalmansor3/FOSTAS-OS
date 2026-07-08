@@ -56,28 +56,40 @@ class FOSTASCore:
             context += f"Existing code in {target_file}:\n{self.project_memory['scripts'][target_file]}\n"
         return context
 
+    # 7. Bug Hunter & Model Auto-Fallback
     def write_and_fix_code(self, task_desc: str, target_file: str) -> str:
         context = self._get_context_for_file(target_file)
         
-        for attempt in range(2): # Max 2 deneme
+        # Hesabın hangi modeli desteklediğini bilemediğimiz için 3 modeli sırayla dener
+        models_to_try = ["glm-4-flash", "glm-3-turbo", "glm-4", "chatglm_turbo"]
+        
+        for attempt in range(2): # Max 2 deneme (Compile -> Fix)
             if attempt == 0:
                 prompt = f"Task: {task_desc}\nContext: {context}\nWrite Godot 4.3 GDScript code for {target_file}. No markdown blocks, pure code."
             else:
                 prompt = f"Previous code had errors: {error_log}\nFix the code for {target_file}."
 
-            try:
-                resp = self.zai.chat.completions.create(
-                    model="glm-4-flash", 
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                code = resp.choices[0].message.content.replace("```gdscript", "").replace("```", "").strip()
-                
+            code = None
+            error_log = ""
+            
+            # Model döngüsü
+            for model_name in models_to_try:
+                try:
+                    resp = self.zai.chat.completions.create(
+                        model=model_name, 
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    code = resp.choices[0].message.content.replace("```gdscript", "").replace("```", "").strip()
+                    break # Model çalıştıysa döngüden çık
+                except Exception as e:
+                    error_log = f"Model {model_name} failed: {str(e)}"
+                    continue # Sonraki modeli dene
+
+            if code:
                 error_log = self._validate_gdscript(code)
                 if not error_log:
                     self.project_memory["scripts"][target_file] = code
                     return f"✅ Successfully generated and validated {target_file}.\n\n```gdscript\n{code}\n```"
-            except Exception as e:
-                error_log = str(e)
                 
         return f"❌ Failed to generate code for {target_file}. Error: {error_log}"
 
