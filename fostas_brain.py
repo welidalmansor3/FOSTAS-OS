@@ -6,7 +6,6 @@ from openai import OpenAI
 import requests
 from dotenv import load_dotenv
 
-# .env dosyasını yükler
 load_dotenv()
 
 class FOSTASCore:
@@ -22,14 +21,13 @@ class FOSTASCore:
             }
         }
         
-        # .env'den anahtarları al
         zai_key = os.getenv("ZAI_API_KEY")
         gemini_key = os.getenv("GEMINI_API_KEY")
         tripo_key = os.getenv("TRIPO_API_KEY")
 
-        # AI Configs
         genai.configure(api_key=gemini_key)
         self.gemini = genai.GenerativeModel('gemini-1.5-flash')
+        self.gemini_pro = genai.GenerativeModel('gemini-1.5-pro') # Kod yazmak için Pro kullanacağız
         self.zai = OpenAI(api_key=zai_key, base_url="https://open.bigmodel.cn/api/paas/v4/")
         self.tripo_key = tripo_key
 
@@ -56,40 +54,46 @@ class FOSTASCore:
             context += f"Existing code in {target_file}:\n{self.project_memory['scripts'][target_file]}\n"
         return context
 
-    # 7. Bug Hunter & Model Auto-Fallback
+    # 7. Bug Hunter & Z.AI to Gemini Fallback
     def write_and_fix_code(self, task_desc: str, target_file: str) -> str:
         context = self._get_context_for_file(target_file)
         
-        # Hesabın hangi modeli desteklediğini bilemediğimiz için 3 modeli sırayla dener
-        models_to_try = ["glm-4-flash", "glm-3-turbo", "glm-4", "chatglm_turbo"]
+        models_to_try = ["glm-4-flash", "glm-3-turbo", "glm-4"]
+        code = None
+        error_log = ""
         
-        for attempt in range(2): # Max 2 deneme (Compile -> Fix)
-            if attempt == 0:
+        # Deneme 1: Z.AI Modellerini Sırayla Dener
+        for model_name in models_to_try:
+            try:
+                resp = self.zai.chat.completions.create(
+                    model=model_name, 
+                    messages=[{"role": "user", "content": f"Task: {task_desc}\nContext: {context}\nWrite Godot 4.3 GDScript code for {target_file}. No markdown blocks, pure code."}]
+                )
+                code = resp.choices[0].message.content.replace("```gdscript", "").replace("```", "").strip()
+                break
+            except Exception as e:
+                error_log = f"Model {model_name} failed: {str(e)}"
+                continue
+
+        # Deneme 2: Eğer Z.AI çalışmadıysa (code hala None ise), Gemini Pro ile yaz!
+        if not code:
+            try:
                 prompt = f"Task: {task_desc}\nContext: {context}\nWrite Godot 4.3 GDScript code for {target_file}. No markdown blocks, pure code."
+                resp = self.gemini_pro.generate_content(prompt)
+                code = resp.text.replace("```gdscript", "").replace("```", "").strip()
+                error_log = ""
+            except Exception as e:
+                return f"❌ Failed to generate code with both Z.AI and Gemini. Error: {str(e)}"
+
+        # Validation (Bug Hunter)
+        if code:
+            validation_error = self._validate_gdscript(code)
+            if not validation_error:
+                self.project_memory["scripts"][target_file] = code
+                return f"✅ Successfully generated and validated {target_file}.\n\n```gdscript\n{code}\n```"
             else:
-                prompt = f"Previous code had errors: {error_log}\nFix the code for {target_file}."
-
-            code = None
-            error_log = ""
-            
-            # Model döngüsü
-            for model_name in models_to_try:
-                try:
-                    resp = self.zai.chat.completions.create(
-                        model=model_name, 
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    code = resp.choices[0].message.content.replace("```gdscript", "").replace("```", "").strip()
-                    break # Model çalıştıysa döngüden çık
-                except Exception as e:
-                    error_log = f"Model {model_name} failed: {str(e)}"
-                    continue # Sonraki modeli dene
-
-            if code:
-                error_log = self._validate_gdscript(code)
-                if not error_log:
-                    self.project_memory["scripts"][target_file] = code
-                    return f"✅ Successfully generated and validated {target_file}.\n\n```gdscript\n{code}\n```"
+                self.project_memory["scripts"][target_file] = code # Yine de kaydet, kullanıcı düzeltebilir
+                return f"⚠️ Generated {target_file} but validation found: {validation_error}\n\n```gdscript\n{code}\n```"
                 
         return f"❌ Failed to generate code for {target_file}. Error: {error_log}"
 
