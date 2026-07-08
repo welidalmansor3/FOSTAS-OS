@@ -26,16 +26,25 @@ with st.sidebar:
     fostas = st.session_state.fostas
     
     st.subheader("📜 Scripts")
-    for script_name in fostas.project_memory["scripts"].keys():
-        st.code(script_name, language="python")
+    if fostas.project_memory["scripts"]:
+        for script_name in fostas.project_memory["scripts"].keys():
+            st.code(script_name, language="python")
+    else:
+        st.write("Henüz script yok.")
         
     st.subheader("🌍 Scenes")
-    for scene_name in fostas.project_memory["scenes"].keys():
-        st.code(scene_name, language="xml")
+    if fostas.project_memory["scenes"]:
+        for scene_name in fostas.project_memory["scenes"].keys():
+            st.code(scene_name, language="xml")
+    else:
+        st.write("Henüz sahne yok.")
         
     st.subheader("🎨 Asset Registry")
-    for asset in fostas.project_memory["assets"]:
-        st.write(f"✅ {asset['name']}")
+    if fostas.project_memory["assets"]:
+        for asset in fostas.project_memory["assets"]:
+            st.write(f"✅ {asset['name']}")
+    else:
+        st.write("Henüz 3D model yok.")
 
 # Main Dashboard
 st.title("🎮 FOSTAS OS")
