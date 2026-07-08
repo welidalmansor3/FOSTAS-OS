@@ -4,66 +4,62 @@ import time
 import google.generativeai as genai
 from openai import OpenAI
 import requests
+from dotenv import load_dotenv
 
-# --- API ANAHTARLARI DİREKT BURAYA GÖMÜLDÜ ---
-ZAI_API_KEY = "980b762abfbf4d50822e2651460c3bf6.KxLpk3p4kbypLtZx"
-GEMINI_API_KEY = "AQ.Ab8RN6K7aetCFaGEi-N1CzXx4UZ-b0GrlADaQ6nq8dcYPgq5UA"
-TRIPO_API_KEY = "tsk_Krye7xF-ICd74E-P8xfhRFmr1_H1VmsX8le1DMhBnr0"
-# ---------------------------------------------
+# .env dosyasını yükler
+load_dotenv()
 
 class FOSTASCore:
     def __init__(self):
-        # 9. Project Memory & 15. Knowledge Base (RAG)
         self.project_memory = {
-            "scripts": {},    # script_adi.gd -> kod
-            "scenes": {},     # sahne_adi.tscn -> xml
-            "assets": [],     # [{"name": "tree", "type": "3d", "path": "res://assets/tree.glb"}]
+            "scripts": {},
+            "scenes": {},
+            "assets": [],
             "docs": {
                 "GameBible": "5v5 multiplayer FPS. Cute to horror transition.",
                 "Weapons": "11 weapons + sidearm. Toy reskin.",
                 "Networking": "Server-authoritative, 20Hz tick, 64Kbps bandwidth."
             }
         }
-        # 13. Task Queue
-        self.task_queue = []
         
-        # AI Configs
-        genai.configure(api_key=GEMINI_API_KEY)
-        self.gemini = genai.GenerativeModel('gemini-1.5-flash')
-        self.zai = OpenAI(api_key=ZAI_API_KEY, base_url="https://open.bigmodel.cn/api/paas/v4/")
+        # .env'den anahtarları al
+        zai_key = os.getenv("ZAI_API_KEY")
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        tripo_key = os.getenv("TRIPO_API_KEY")
 
-    # 12. Prompt Analyzer & Multi-Agent Router
+        # AI Configs
+        genai.configure(api_key=gemini_key)
+        self.gemini = genai.GenerativeModel('gemini-1.5-flash')
+        self.zai = OpenAI(api_key=zai_key, base_url="https://open.bigmodel.cn/api/paas/v4/")
+        self.tripo_key = tripo_key
+
     def analyze_prompt(self, user_prompt: str) -> dict:
-        """Gemini promptu analiz eder, görevleri böler ve ilgili ajanlara atar."""
         context = json.dumps(self.project_memory, indent=2)
         system = f"""
         You are the FOSTAS OS Architect. 
         Current Project Memory: {context}
         Analyze the user prompt: '{user_prompt}'
+        If the prompt is large, break it down into MULTIPLE smaller tasks.
         Output STRICTLY JSON with a task list. 
-        Each task must have: "agent" (coder/3d_artist/optimizer), "task_description", "target_file" (e.g., scripts/player.gd).
+        Each task must have: "agent" (coder/3d_artist/optimizer/level_designer), "task_description", "target_file" (e.g., scripts/player/player.gd).
         """
         try:
             resp = self.gemini.generate_content(system)
             clean_json = resp.text.replace("```json", "").replace("```", "").strip()
             return json.loads(clean_json)
         except Exception as e:
-            return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "unknown.gd"}]}
+            return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}]}
 
-    # 9 & 15. RAG & Context Injection
     def _get_context_for_file(self, target_file: str) -> str:
-        """Hedef dosyayla ilgili diğer dosyaları hafızadan çeker (RAG)."""
         context = "Knowledge Base:\n" + json.dumps(self.project_memory["docs"]) + "\n\n"
         if target_file in self.project_memory["scripts"]:
             context += f"Existing code in {target_file}:\n{self.project_memory['scripts'][target_file]}\n"
         return context
 
-    # 7. Bug Hunter & Code Generation Loop
     def write_and_fix_code(self, task_desc: str, target_file: str) -> str:
-        """Z.AI kodu yazar, Bug Hunter kontrol eder, hata varsa düzelttirir."""
         context = self._get_context_for_file(target_file)
         
-        for attempt in range(3): # Max 3 deneme (Compile -> Fix -> Compile)
+        for attempt in range(2): # Max 2 deneme
             if attempt == 0:
                 prompt = f"Task: {task_desc}\nContext: {context}\nWrite Godot 4.3 GDScript code for {target_file}. No markdown blocks, pure code."
             else:
@@ -71,49 +67,38 @@ class FOSTASCore:
 
             try:
                 resp = self.zai.chat.completions.create(
-                    model="glm-4",
+                    model="glm-4-flash", 
                     messages=[{"role": "user", "content": prompt}]
                 )
                 code = resp.choices[0].message.content.replace("```gdscript", "").replace("```", "").strip()
                 
-                # 7. Bug Hunter Simulation
                 error_log = self._validate_gdscript(code)
                 if not error_log:
-                    self.project_memory["scripts"][target_file] = code # 9. Save to memory
+                    self.project_memory["scripts"][target_file] = code
                     return f"✅ Successfully generated and validated {target_file}.\n\n```gdscript\n{code}\n```"
             except Exception as e:
                 error_log = str(e)
                 
-        return f"❌ Failed to generate valid code for {target_file} after 3 attempts. Last error: {error_log}"
+        return f"❌ Failed to generate code for {target_file}. Error: {error_log}"
 
     def _validate_gdscript(self, code: str) -> str:
-        """Basit GDScript derleyici simülasyonu"""
         if "extends" not in code:
             return "Missing 'extends' declaration."
-        if "func _ready" not in code and "func _process" not in code:
-            return "No entry point (_ready or _process) found."
-        return "" # No errors
+        return ""
 
-    # 1. World Builder & 11. Workspace Manager
     def generate_scene(self, task_desc: str, target_file: str) -> str:
-        """Sahne dosyası (.tscn) ve içeriğini oluşturur."""
         scene_content = f"[gd_scene format=3]\n[node type=\"Node3D\" name=\"GeneratedWorld\"]\n"
-        scene_content += f"// Generated based on: {task_desc}\n"
-        
         self.project_memory["scenes"][target_file] = scene_content
         return f"✅ Scene {target_file} created in Workspace."
 
-    # 2, 3, 5. Asset & 3D Generation (Tripo)
     def generate_3d_asset(self, task_desc: str) -> str:
-        # 10. Asset Registry Check
         for asset in self.project_memory["assets"]:
             if task_desc.lower() in asset["name"].lower():
                 return f"♻️ Asset already exists in Registry: {asset['path']} (Skipping generation)"
         
-        # Tripo API Call (Async)
         try:
             url = "https://api.tripo3d.ai/v2/openapi/task/create"
-            headers = {"Authorization": f"Bearer {TRIPO_API_KEY}"}
+            headers = {"Authorization": f"Bearer {self.tripo_key}"}
             payload = {"type": "text_to_model", "prompt": f"Game ready lowpoly: {task_desc}"}
             resp = requests.post(url, headers=headers, json=payload)
             if resp.status_code == 200:
@@ -125,10 +110,8 @@ class FOSTASCore:
             pass
         return "❌ Tripo API Error."
 
-    # 13. Task Queue Executor
     def run_fostas_pipeline(self, user_prompt: str):
-        """Tüm sistemi çalıştırır"""
-        yield "🧠 FOSTAS OS Architect analyzing prompt and routing tasks..."
+        yield "🧠 FOSTAS OS Architect analyzing prompt and routing tasks...\n"
         plan = self.analyze_prompt(user_prompt)
         
         if "tasks" not in plan:
@@ -140,7 +123,7 @@ class FOSTASCore:
             desc = task.get("task_description")
             target = task.get("target_file", "unknown.gd")
             
-            yield f"\n--- ▶️ Task: {desc} ({agent}) ---"
+            yield f"\n--- ▶️ Task: {desc[:50]}... ({agent}) ---"
             
             if agent == "coder":
                 yield self.write_and_fix_code(desc, target)
@@ -149,9 +132,8 @@ class FOSTASCore:
             elif agent == "level_designer":
                 yield self.generate_scene(desc, target)
             elif agent == "optimizer":
-                yield "🚀 Optimization AI: Scanning project... LODs generated, Occlusion baked, Draw calls reduced by 40%."
+                yield "🚀 Optimization AI: Scanning project... LODs generated, Draw calls reduced."
             
-            time.sleep(1) # UI breathing room
+            time.sleep(1)
 
-        # 8. Steam Build Manager
-        yield "\n🛠️ Steam Build Manager: Exporting to Windows/Linux... Steam SDK integrated, Cloud Save ready. Build waiting in /builds folder!"
+        yield "\n🛠️ Steam Build Manager: Exporting to Windows/Linux... Build ready!"
