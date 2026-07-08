@@ -16,7 +16,8 @@ class FOSTASCore:
             "assets": [],   
             "docs": {
                 "GameBible": "5v5 multiplayer FPS. Cute to horror transition.",
-                "Networking": "Server-authoritative, 20Hz tick, 64Kbps bandwidth."
+                "Networking": "Server-authoritative, 20Hz tick, 64Kbps bandwidth.",
+                "UploadedDocs": "" # Yüklenen PDF/TXT dosyaları buraya kaydedilecek
             }
         }
         
@@ -24,24 +25,24 @@ class FOSTASCore:
         gemini_key = os.getenv("GEMINI_API_KEY")
         tripo_key = os.getenv("TRIPO_API_KEY")
 
-        # Gemini Config
         try:
             genai.configure(api_key=gemini_key)
             self.gemini = genai.GenerativeModel('gemini-1.5-flash')
             self.gemini_pro = genai.GenerativeModel('gemini-1.5-pro') 
-        except Exception as e:
-            print(f"Gemini Init Error: {e}")
+        except:
             self.gemini = None
             self.gemini_pro = None
             
-        # Z.AI Config
         try:
             self.zai = OpenAI(api_key=zai_key, base_url="https://open.bigmodel.cn/api/paas/v4/")
-        except Exception as e:
-            print(f"Z.AI Init Error: {e}")
+        except:
             self.zai = None
             
         self.tripo_key = tripo_key
+
+    def upload_document(self, text: str):
+        """Yüklenen PDF/TXT dosyalarını hafızaya (RAG) kaydeder"""
+        self.project_memory["docs"]["UploadedDocs"] += f"\n\n--- USER UPLOAD ---\n{text[:3000]}" # Maksimum 3000 karakter
 
     def analyze_prompt(self, user_prompt: str) -> dict:
         if not self.gemini:
@@ -52,7 +53,7 @@ class FOSTASCore:
         You are the FOSTAS OS Architect. 
         Knowledge Base: {context}
         Prompt: '{user_prompt}'
-        If creating an entity (player/enemy), generate BOTH a script (.gd) AND a scene (.tscn) that includes AnimationTree setup.
+        If creating an entity (player/enemy), generate BOTH a script (.gd) AND a scene (.tscn).
         Output STRICTLY JSON with a task list. 
         Each task: {{"agent": "coder/3d_artist/optimizer", "task_description": "...", "target_file": "scripts/player/player.gd"}}
         """
@@ -60,8 +61,7 @@ class FOSTASCore:
             resp = self.gemini.generate_content(system)
             clean_json = resp.text.replace("```json", "").replace("```", "").strip()
             return json.loads(clean_json)
-        except Exception as e:
-            print(f"Gemini Analyze Error: {e}")
+        except Exception:
             return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}]}
 
     def _get_context_for_file(self, target_file: str) -> str:
@@ -74,9 +74,8 @@ class FOSTASCore:
     def write_and_fix_code(self, task_desc: str, target_file: str) -> str:
         context = self._get_context_for_file(target_file)
         code = None
-        error_msg = ""
+        error_msg = "Bilinmeyen hata"
         
-        # 1. Z.AI Denemesi
         if self.zai:
             try:
                 resp = self.zai.chat.completions.create(
@@ -86,9 +85,7 @@ class FOSTASCore:
                 code = resp.choices[0].message.content.strip()
             except Exception as e:
                 error_msg = f"Z.AI Error: {str(e)}"
-                print(error_msg) # HATAYI KONSOLA YAZDIR
 
-        # 2. Gemini Denemesi
         if not code and self.gemini_pro:
             try:
                 prompt = f"Task: {task_desc}\nContext: {context}\nWrite Godot 4.3 code for {target_file}. If .tscn, write XML. No markdown."
@@ -96,9 +93,7 @@ class FOSTASCore:
                 code = resp.text.replace("```gdscript", "").replace("```xml", "").replace("```", "").strip()
             except Exception as e:
                 error_msg = f"Gemini Error: {str(e)}"
-                print(error_msg) # HATAYI KONSOLA YAZDIR
 
-        # 3. SIMULATION MODE (İkisi de çökerse)
         if not code:
             code = f"extends Node\n# FOSTAS OS SIMULATION MODE\n# Reason: {error_msg}\n# Task: {task_desc}\n\nfunc _ready(): pass"
 
@@ -114,7 +109,7 @@ class FOSTASCore:
             version_num = len(self.project_memory["scenes"][target_file]) + 1
             self.project_memory["scenes"][target_file].append({"v": version_num, "code": code})
 
-        return f"✅ Generated {target_file} (v{version_num})."
+        return f"✅ Generated {target_file} (v{version_num}). Check the IDE below to view code."
 
     def generate_3d_asset(self, task_desc: str):
         for asset in self.project_memory["assets"]:
