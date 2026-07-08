@@ -10,21 +10,22 @@ load_dotenv()
 
 class FOSTASCore:
     def __init__(self):
-        # 9. Project Memory & 14. Version Control
         self.project_memory = {
-            "scripts": {},  # "scripts/player.gd": [{"v": 1, "code": "..."}, {"v": 2, "code": "..."}]
-            "scenes": {},   # "scenes/player.tscn": [{"v": 1, "code": "..."}]
-            "assets": [],   # [{"name": "Fly", "path": "res://assets/fly.glb", "data": b'binary'}]
+            "scripts": {},  
+            "scenes": {},   
+            "assets": [],   
             "docs": {
                 "GameBible": "5v5 multiplayer FPS. Cute to horror transition.",
                 "Networking": "Server-authoritative, 20Hz tick, 64Kbps bandwidth."
             }
         }
         
-        zai_key = os.getenv("ZAI_API_KEY", "932582eae02443a8b9fa9d9f57e26f57.A7xCiqXN5T5Oy7Vr")
-        gemini_key = os.getenv("GEMINI_API_KEY", "AIzaSyDUMMY_KEY_REPLACE_WITH_REAL_ONE")
-        tripo_key = os.getenv("TRIPO_API_KEY", "tsk_Krye7xF-ICd74E-P8xfhRFmr1_H1VmsX8le1DMhBnr0")
+        # API Anahtarları tamamen .env veya Streamlit Secrets'tan okunur
+        zai_key = os.getenv("ZAI_API_KEY")
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        tripo_key = os.getenv("TRIPO_API_KEY")
 
+        # Gemini Config
         try:
             genai.configure(api_key=gemini_key)
             self.gemini = genai.GenerativeModel('gemini-1.5-flash')
@@ -33,6 +34,7 @@ class FOSTASCore:
             self.gemini = None
             self.gemini_pro = None
             
+        # Z.AI Config
         try:
             self.zai = OpenAI(api_key=zai_key, base_url="https://open.bigmodel.cn/api/paas/v4/")
         except:
@@ -92,7 +94,8 @@ class FOSTASCore:
         if not code:
             code = f"extends Node\n# SIMULATION MODE\nfunc _ready(): pass"
 
-        # 14. Version Control (Save as new version)
+        # 14. Version Control
+        version_num = 1
         if target_file.endswith(".gd"):
             if target_file not in self.project_memory["scripts"]:
                 self.project_memory["scripts"][target_file] = []
@@ -106,10 +109,11 @@ class FOSTASCore:
 
         return f"✅ Generated {target_file} (v{version_num})."
 
-    def generate_3d_asset(self, task_desc: str) -> str:
+    def generate_3d_asset(self, task_desc: str): # Generator olduğu için yield kullanıyoruz
         for asset in self.project_memory["assets"]:
             if task_desc.lower() in asset["name"].lower():
-                return f"♻️ Asset exists: {asset['path']}"
+                yield f"♻️ Asset exists: {asset['path']}"
+                return
 
         try:
             url = "https://api.tripo3d.ai/v2/openapi/task/create"
@@ -121,7 +125,6 @@ class FOSTASCore:
                 task_id = resp.json().get("data", {}).get("task_id")
                 asset_path = f"res://assets/{task_desc.replace(' ', '_')}.glb"
                 
-                # 1. Madde: Polling and Downloading .glb
                 yield f"🎨 Tripo task started (ID: {task_id}). Waiting for model to finish..."
                 model_url = self._poll_tripo_task(task_id)
                 
@@ -143,7 +146,7 @@ class FOSTASCore:
         headers = {"Authorization": f"Bearer {self.tripo_key}"}
         
         for _ in range(max_retries):
-            time.sleep(5) # Wait 5 seconds between checks
+            time.sleep(5) 
             try:
                 resp = requests.get(url, headers=headers)
                 if resp.status_code == 200:
@@ -158,7 +161,6 @@ class FOSTASCore:
         return None
 
     def undo_last_version(self, file_path: str) -> bool:
-        """14. Version Control: Reverts to previous version"""
         if file_path in self.project_memory["scripts"] and len(self.project_memory["scripts"][file_path]) > 1:
             self.project_memory["scripts"][file_path].pop()
             return True
@@ -185,11 +187,10 @@ class FOSTASCore:
             if agent == "coder":
                 yield self.write_and_fix_code(desc, target)
             elif agent == "3d_artist":
-                # Bu bir generator olduğu için yield kullanıyoruz
                 for step in self.generate_3d_asset(desc):
                     yield step
             elif agent == "level_designer":
-                yield self.write_and_fix_code(desc, target) # Sahne dosyalarını da yazar
+                yield self.write_and_fix_code(desc, target) 
             elif agent == "optimizer":
                 yield "🚀 Optimization AI: Scanning project... LODs generated, Draw calls reduced."
             
