@@ -20,7 +20,6 @@ class FOSTASCore:
             }
         }
         
-        # API Anahtarları tamamen .env veya Streamlit Secrets'tan okunur
         zai_key = os.getenv("ZAI_API_KEY")
         gemini_key = os.getenv("GEMINI_API_KEY")
         tripo_key = os.getenv("TRIPO_API_KEY")
@@ -30,14 +29,16 @@ class FOSTASCore:
             genai.configure(api_key=gemini_key)
             self.gemini = genai.GenerativeModel('gemini-1.5-flash')
             self.gemini_pro = genai.GenerativeModel('gemini-1.5-pro') 
-        except:
+        except Exception as e:
+            print(f"Gemini Init Error: {e}")
             self.gemini = None
             self.gemini_pro = None
             
         # Z.AI Config
         try:
             self.zai = OpenAI(api_key=zai_key, base_url="https://open.bigmodel.cn/api/paas/v4/")
-        except:
+        except Exception as e:
+            print(f"Z.AI Init Error: {e}")
             self.zai = None
             
         self.tripo_key = tripo_key
@@ -59,7 +60,8 @@ class FOSTASCore:
             resp = self.gemini.generate_content(system)
             clean_json = resp.text.replace("```json", "").replace("```", "").strip()
             return json.loads(clean_json)
-        except Exception:
+        except Exception as e:
+            print(f"Gemini Analyze Error: {e}")
             return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}]}
 
     def _get_context_for_file(self, target_file: str) -> str:
@@ -72,7 +74,9 @@ class FOSTASCore:
     def write_and_fix_code(self, task_desc: str, target_file: str) -> str:
         context = self._get_context_for_file(target_file)
         code = None
+        error_msg = ""
         
+        # 1. Z.AI Denemesi
         if self.zai:
             try:
                 resp = self.zai.chat.completions.create(
@@ -80,21 +84,24 @@ class FOSTASCore:
                     messages=[{"role": "user", "content": f"Task: {task_desc}\nContext: {context}\nWrite Godot 4.3 code for {target_file}. If .tscn, write XML. No markdown."}]
                 )
                 code = resp.choices[0].message.content.strip()
-            except:
-                code = None 
+            except Exception as e:
+                error_msg = f"Z.AI Error: {str(e)}"
+                print(error_msg) # HATAYI KONSOLA YAZDIR
 
+        # 2. Gemini Denemesi
         if not code and self.gemini_pro:
             try:
                 prompt = f"Task: {task_desc}\nContext: {context}\nWrite Godot 4.3 code for {target_file}. If .tscn, write XML. No markdown."
                 resp = self.gemini_pro.generate_content(prompt)
                 code = resp.text.replace("```gdscript", "").replace("```xml", "").replace("```", "").strip()
-            except:
-                code = None
+            except Exception as e:
+                error_msg = f"Gemini Error: {str(e)}"
+                print(error_msg) # HATAYI KONSOLA YAZDIR
 
+        # 3. SIMULATION MODE (İkisi de çökerse)
         if not code:
-            code = f"extends Node\n# SIMULATION MODE\nfunc _ready(): pass"
+            code = f"extends Node\n# FOSTAS OS SIMULATION MODE\n# Reason: {error_msg}\n# Task: {task_desc}\n\nfunc _ready(): pass"
 
-        # 14. Version Control
         version_num = 1
         if target_file.endswith(".gd"):
             if target_file not in self.project_memory["scripts"]:
@@ -109,7 +116,7 @@ class FOSTASCore:
 
         return f"✅ Generated {target_file} (v{version_num})."
 
-    def generate_3d_asset(self, task_desc: str): # Generator olduğu için yield kullanıyoruz
+    def generate_3d_asset(self, task_desc: str):
         for asset in self.project_memory["assets"]:
             if task_desc.lower() in asset["name"].lower():
                 yield f"♻️ Asset exists: {asset['path']}"
