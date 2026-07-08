@@ -3,13 +3,13 @@ import json
 import time
 import google.generativeai as genai
 from openai import OpenAI
-from dotenv import load_dotenv
+import requests
 
-load_dotenv()
-
-ZAI_API_KEY = os.getenv("980b762abfbf4d50822e2651460c3bf6.KxLpk3p4kbypLtZx")
-GEMINI_API_KEY = os.getenv("AQ.Ab8RN6K7aetCFaGEi-N1CzXx4UZ-b0GrlADaQ6nq8dcYPgq5UA")
-TRIPO_API_KEY = os.getenv("tsk_Krye7xF-ICd74E-P8xfhRFmr1_H1VmsX8le1DMhBnr0")
+# --- API ANAHTARLARI DİREKT BURAYA GÖMÜLDÜ ---
+ZAI_API_KEY = "980b762abfbf4d50822e2651460c3bf6.KxLpk3p4kbypLtZx"
+GEMINI_API_KEY = "AQ.Ab8RN6K7aetCFaGEi-N1CzXx4UZ-b0GrlADaQ6nq8dcYPgq5UA"
+TRIPO_API_KEY = "tsk_Krye7xF-ICd74E-P8xfhRFmr1_H1VmsX8le1DMhBnr0"
+# ---------------------------------------------
 
 class FOSTASCore:
     def __init__(self):
