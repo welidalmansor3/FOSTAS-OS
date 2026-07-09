@@ -21,9 +21,6 @@ class FOSTASCore:
                 "Networking": "Server-authoritative, 20Hz tick, 64Kbps bandwidth.",
                 "UploadedDocs": ""
             },
-            # YENİ: agent'lar arası paylaşılan bağlam.
-            # coder bir script yazınca ya da 3d_artist bir asset üretince
-            # buraya kısa bir özet düşer, bir sonraki task bunu görür.
             "shared_context_log": []
         }
 
@@ -31,8 +28,6 @@ class FOSTASCore:
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.tripo_key = os.getenv("TRIPO_API_KEY")
 
-        # Hangi servislerin gerçekten aktif olduğunu başlangıçta netleştiriyoruz.
-        # Eskiden except: pass ile sessizce None oluyordu, şimdi sebep saklanıyor.
         self.status = {
             "gemini": {"ok": False, "error": None},
             "zai": {"ok": False, "error": None},
@@ -67,15 +62,10 @@ class FOSTASCore:
         else:
             self.status["tripo"]["error"] = "TRIPO_API_KEY .env dosyasında yok."
 
-    # ------------------------------------------------------------------
-    # DOKÜMAN YÜKLEME
-    # ------------------------------------------------------------------
     def upload_document(self, text: str):
-        """Yüklenen PDF/TXT dosyalarını hafızaya (RAG) kaydeder"""
         self.project_memory["docs"]["UploadedDocs"] += f"\n\n--- USER UPLOAD ---\n{text[:3000]}"
 
     def generate_from_doc(self):
-        """Yüklenen dökümana göre otomatik prototip planı çıkarır ve çalıştırır."""
         doc_text = self.project_memory["docs"]["UploadedDocs"]
         if not doc_text.strip():
             yield "⚠️ Önce bir döküman yükle."
@@ -86,12 +76,8 @@ class FOSTASCore:
         ):
             yield step
 
-    # ------------------------------------------------------------------
-    # PLANLAMA (ARCHITECT)
-    # ------------------------------------------------------------------
     def analyze_prompt(self, user_prompt: str) -> dict:
         if not self.gemini:
-            # Gemini yoksa bile en azından tek görevlik bir fallback plan üret.
             return {
                 "tasks": [
                     {"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}
@@ -127,7 +113,6 @@ class FOSTASCore:
                 raise ValueError("Plan boş geldi.")
             return plan
         except Exception as e:
-            # Sessizce yutmak yerine sebebi kullanıcıya taşıyoruz.
             return {
                 "tasks": [
                     {"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}
@@ -135,9 +120,6 @@ class FOSTASCore:
                 "planning_error": str(e)
             }
 
-    # ------------------------------------------------------------------
-    # BAĞLAM TOPLAMA (agent'lar birbirini görsün diye)
-    # ------------------------------------------------------------------
     def _get_context_for_file(self, target_file: str) -> str:
         context = "Knowledge Base:\n" + json.dumps(self.project_memory["docs"], ensure_ascii=False) + "\n\n"
 
@@ -149,8 +131,6 @@ class FOSTASCore:
             latest_scene = self.project_memory["scenes"][target_file][-1]["code"]
             context += f"Existing scene in {target_file}:\n{latest_scene}\n\n"
 
-        # Son üretilen asset ve script'leri de ekliyoruz ki .tscn üretirken
-        # LLM hangi script'e ve hangi .glb'ye referans vereceğini bilsin.
         if self.project_memory["assets"]:
             asset_list = ", ".join(a["path"] for a in self.project_memory["assets"])
             context += f"Available 3D assets: {asset_list}\n"
@@ -164,9 +144,6 @@ class FOSTASCore:
     def _log_shared_context(self, entry: str):
         self.project_memory["shared_context_log"].append(entry)
 
-    # ------------------------------------------------------------------
-    # KOD / SAHNE ÜRETİMİ
-    # ------------------------------------------------------------------
     def write_and_fix_code(self, task_desc: str, target_file: str) -> str:
         context = self._get_context_for_file(target_file)
         is_scene = target_file.endswith(".tscn")
@@ -256,7 +233,6 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
 """
 
     def _validate_or_fallback_scene(self, code: str, target_file: str) -> str:
-        """LLM çıktısı gerçek bir .tscn'e benzemiyorsa (örn. GDScript yazmışsa) fallback'e düş."""
         if code.strip().startswith("[gd_scene"):
             return code
         return self._fallback_scene(target_file)
@@ -269,7 +245,7 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
         )
 
     # ------------------------------------------------------------------
-    # 3D ASSET ÜRETİMİ (TRIPO)
+    # 3D ASSET ÜRETİMİ (TRIPO) - LINK DÜZELTİLDİ!
     # ------------------------------------------------------------------
     def generate_3d_asset(self, task_desc: str):
         for asset in self.project_memory["assets"]:
@@ -283,7 +259,8 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
             return
 
         try:
-            url = "https://api.tripo3d.ai/v2/openapi/task/create"
+            # DÜZELTME BURADA: /task/create yerine /task kullanıldı
+            url = "https://api.tripo3d.ai/v2/openapi/task"
             headers = {"Authorization": f"Bearer {self.tripo_key}"}
             payload = {"type": "text_to_model", "prompt": f"Game ready lowpoly: {task_desc}"}
             resp = requests.post(url, headers=headers, json=payload, timeout=30)
@@ -318,11 +295,6 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
             yield f"❌ Tripo Connection Error: {str(e)}"
 
     def _poll_tripo_task(self, task_id: str, max_retries=36, interval=5):
-        """
-        Eskiden max 30sn (6x5) bekliyordu, Tripo genelde daha uzun sürüyor.
-        Şimdi ~3 dakika (36x5sn) bekliyor ve ilerlemeyi yield ediyor.
-        Sonuç bulunduğunda ('done', model_url) tuple'ı yield eder.
-        """
         url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
         headers = {"Authorization": f"Bearer {self.tripo_key}"}
 
@@ -342,16 +314,13 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
                     elif status == "failed":
                         yield ("done", None)
                         return
-                    elif attempt % 4 == 0:  # her ~20sn'de bir ilerleme mesajı
+                    elif attempt % 4 == 0:
                         yield f"⏳ Tripo status: {status} ({progress}%)..."
             except Exception:
                 pass
 
         yield ("done", None)
 
-    # ------------------------------------------------------------------
-    # UNDO
-    # ------------------------------------------------------------------
     def undo_last_version(self, file_path: str) -> bool:
         if file_path in self.project_memory["scripts"] and len(self.project_memory["scripts"][file_path]) > 1:
             self.project_memory["scripts"][file_path].pop()
@@ -361,9 +330,6 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
             return True
         return False
 
-    # ------------------------------------------------------------------
-    # ANA PIPELINE
-    # ------------------------------------------------------------------
     def run_fostas_pipeline(self, user_prompt: str):
         yield "🧠 FOSTAS OS Architect analyzing prompt and routing tasks...\n"
 
