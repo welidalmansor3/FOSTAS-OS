@@ -10,18 +10,36 @@ from fostas_brain import FOSTASCore
 
 st.set_page_config(page_title="FOSTAS OS - AI Game Studio", page_icon="🎮", layout="wide")
 
-# CSS Full Black Theme
+# CSS Full Black Theme (Saf Siyah)
 st.markdown("""
 <style>
     .stApp { background-color: #000000; color: #ffffff; }
-    .stTextArea textarea, .stChatInput textarea { background-color: #111111; color: #ffffff; border: 1px solid #333333; }
-    .stChatInput { background-color: #000000; }
+    
+    /* Sohbet çubuğu ve arka planı tamamen siyah yapıyoruz */
+    .stChatInput, .stChatInputContainer, [data-testid="stChatInput"] {
+        background-color: #000000 !important;
+    }
+    .stChatInput textarea {
+        background-color: #0a0a0a !important;
+        color: #ffffff !important;
+        border: 1px solid #333333 !important;
+    }
+    
+    .stTextArea textarea { background-color: #0a0a0a; color: #ffffff; border: 1px solid #333333; }
     h1, h2, h3 { color: #ff4b4b; }
-    .stButton button { background-color: #1a1a1a; color: white; border: 1px solid #444; }
-    .stDownloadButton button { background-color: #ff4b4b; color: white; border: none; }
-    .stSelectbox > div > div { background-color: #111111; color: white; }
-    iframe { border: 2px solid #333; border-radius: 10px; }
-    div.stExpander { background-color: #0a0a0a; border: 1px solid #222; }
+    .stButton button { background-color: #1a1a1a; color: white; border: 1px solid #444; border-radius: 8px; }
+    .stButton button:hover { background-color: #2a2a2a; border-color: #ff4b4b; }
+    .stDownloadButton button { background-color: #ff4b4b; color: white; border: none; border-radius: 8px; }
+    .stSelectbox > div > div { background-color: #0a0a0a; color: white; border: 1px solid #333; }
+    div.stExpander { background-color: #050505; border: 1px solid #222; border-radius: 8px; }
+    
+    /* Sohbet mesaj balonları */
+    [data-testid="stChatMessage"] {
+        background-color: #0a0a0a;
+        border: 1px solid #222;
+        border-radius: 12px;
+        padding: 15px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -31,9 +49,7 @@ if 'fostas' not in st.session_state:
 if 'selected_file' not in st.session_state:
     st.session_state.selected_file = None
 if 'messages' not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Merhaba Kanka! Ben FOSTAS OS. Oyununu tasarlamak için bana bir şeyler yaz. Örn: 'FPS player kodu yaz ve 3D tüfek modeli üret.'"}]
-if 'project_ready' not in st.session_state:
-    st.session_state.project_ready = False # Test ekranını gizlemek için
+    st.session_state.messages = [{"role": "assistant", "content": "Merhaba Kanka! Ben FOSTAS OS. Aşağıdan bir şeyler yaz, dosya ekle veya 3D model üret. Örn: 'Mobil oyun için player kodu yaz.'"}]
 
 fostas = st.session_state.fostas
 
@@ -106,27 +122,25 @@ with st.sidebar:
 st.title("🎮 FOSTAS OS")
 st.subheader("The AI Operating System for AAA Game Development")
 
-col_chat, col_game = st.columns([1.5, 1.0])
+# Sohbet Ekranı
+st.header("💬 AI Chat & Prompt")
 
-with col_chat:
-    st.header("💬 AI Chat & Prompt")
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Sohbet Çubuğunun Hemen Üstündeki Araç Çubuğu (Z.AI / ChatGPT Tarzı)
+with st.container():
+    col_tool1, col_tool2 = st.columns([1, 1])
     
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    with st.expander("📎 Dosya Ekle veya Hızlı 3D Model Üret"):
-        uploaded_file = st.file_uploader("Geliştirme Dökümanı Yükle (PDF, DOCX, TXT, MD)", type=["pdf", "docx", "txt", "md"])
-        if uploaded_file is not None:
-            col_up1, col_up2 = st.columns(2)
-            with col_up1:
-                if st.button("📄 Dökümanı Oku"):
+    with col_tool1:
+        # Dosya Ekleme
+        with st.expander("📎 Dosya Ekle", expanded=False):
+            uploaded_file = st.file_uploader("Geliştirme Dökümanı Yükle", type=["pdf", "docx", "txt", "md"], label_visibility="collapsed")
+            if uploaded_file is not None:
+                if st.button("📄 Dökümanı AI'a Okut ve Oyun Yap", key="read_doc"):
                     text = read_uploaded_file(uploaded_file)
                     fostas.upload_document(text)
-                    st.session_state.messages.append({"role": "assistant", "content": f"✅ {uploaded_file.name} başarıyla hafızama yüklendi!"})
-                    st.rerun()
-            with col_up2:
-                if st.button("🚀 Bu Dosyaya Göre Oyun Yap"):
                     st.session_state.messages.append({"role": "user", "content": "Yüklenen dosyaya göre prototype üret!"})
                     with st.chat_message("user"):
                         st.markdown("Yüklenen dosyaya göre prototype üret!")
@@ -139,54 +153,45 @@ with col_chat:
                             response_placeholder.markdown(full_response + "▌")
                         response_placeholder.markdown(full_response)
                         st.session_state.messages.append({"role": "assistant", "content": full_response})
-                        st.session_state.project_ready = True
                     st.rerun()
+
+    with col_tool2:
+        # Hızlı 3D Model Üretme
+        with st.expander("🎨 Hızlı 3D Model Üret", expanded=False):
+            quick_3d_prompt = st.text_input("Model adı:", label_visibility="collapsed")
+            if st.button("🚀 Generate 3D", key="gen_3d"):
+                if quick_3d_prompt:
+                    st.session_state.messages.append({"role": "user", "content": f"Şu 3D modeli üret: {quick_3d_prompt}"})
+                    with st.chat_message("user"):
+                        st.markdown(f"Şu 3D modeli üret: {quick_3d_prompt}")
+                    
+                    with st.chat_message("assistant"):
+                        response_placeholder = st.empty()
+                        full_response = ""
+                        for step in fostas.generate_3d_asset(quick_3d_prompt):
+                            full_response += step + "\n"
+                            response_placeholder.markdown(full_response + "▌")
+                        response_placeholder.markdown(full_response)
+                        st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    st.rerun()
+
+# Sohbet Çubuğu (Prompt Input)
+if prompt := st.chat_input("Ne yapmak istersin? (Örn: FPS player kodu yaz)"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        response_placeholder = st.empty()
+        full_response = ""
         
-        st.markdown("---")
-        quick_3d_prompt = st.text_input("Hızlı 3D Model Üret (Tripo/Sketchfab):")
-        if st.button("🎨 Generate 3D"):
-            if quick_3d_prompt:
-                st.session_state.messages.append({"role": "user", "content": f"Şu 3D modeli üret: {quick_3d_prompt}"})
-                with st.chat_message("user"):
-                    st.markdown(f"Şu 3D modeli üret: {quick_3d_prompt}")
-                
-                with st.chat_message("assistant"):
-                    response_placeholder = st.empty()
-                    full_response = ""
-                    for step in fostas.generate_3d_asset(quick_3d_prompt):
-                        full_response += step + "\n"
-                        response_placeholder.markdown(full_response + "▌")
-                    response_placeholder.markdown(full_response)
-                    st.session_state.messages.append({"role": "assistant", "content": full_response})
-                st.rerun()
-
-    # Sohbet Çubuğu
-    if prompt := st.chat_input("Ne yapmak istersin? (Örn: FPS player kodu yaz)"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            response_placeholder = st.empty()
-            full_response = ""
+        for step_output in fostas.run_fostas_pipeline(prompt):
+            full_response += step_output + "\n"
+            response_placeholder.markdown(full_response + "▌")
             
-            for step_output in fostas.run_fostas_pipeline(prompt):
-                full_response += step_output + "\n"
-                response_placeholder.markdown(full_response + "▌")
-                
-            response_placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
-            st.session_state.project_ready = True # Prompt bitince test ekranını aç
-        st.rerun()
-
-with col_game:
-    st.header("🎮 Game Test Screen")
-    # Sadece proje üretildikten sonra Godot Editörü Gözüksün
-    if st.session_state.project_ready:
-        st.caption("Oyun kodu tamamlandı! Sol menüden ZIP indirip buradaki Godot editörüne sürükle ve oyna!")
-        st.components.v1.iframe("https://editor.godotengine.org/releases/4.3.stable/godot.editor.html", height=650, scrolling=True)
-    else:
-        st.info("Test ekranını açmak için sağ taraftan bir prompt yaz veya dosya yükleyip oyunu üret.")
+        response_placeholder.markdown(full_response)
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
+    st.rerun()
 
 # --- KOD EDITÖRÜ ---
 st.markdown("---")
