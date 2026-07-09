@@ -3,21 +3,23 @@ import io
 import zipfile
 import streamlit as st
 import json
+from pypdf import PdfReader
+import docx
 
-# FOSTAS Core'u çağırıyoruz (Anahtar işlerini o kendi içinde halleder)
 from fostas_brain import FOSTASCore
 
 st.set_page_config(page_title="FOSTAS OS - AI Game Studio", page_icon="🎮", layout="wide")
 
-# CSS Dark IDE Theme
+# CSS Dark Theme
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
-    .stTextArea textarea { background-color: #1e1e1e; color: #d4d4d4; font-family: monospace; border: 1px solid #444; }
+    .stTextArea textarea, .stChatInput textarea { background-color: #1e1e1e; color: #d4d4d4; font-family: monospace; border: 1px solid #444; }
     h1, h2, h3 { color: #ff4b4b; }
     .stButton button { background-color: #2d2d2d; color: white; border: 1px solid #444; }
     .stDownloadButton button { background-color: #ff4b4b; color: white; border: none; }
     .stSelectbox > div > div { background-color: #1e1e1e; color: white; }
+    iframe { border: 2px solid #333; border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -26,118 +28,155 @@ if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
 if 'selected_file' not in st.session_state:
     st.session_state.selected_file = None
+if 'messages' not in st.session_state:
+    # Karşılama mesajı
+    st.session_state.messages = [{"role": "assistant", "content": "Merhaba Kanka! Ben FOSTAS OS. Oyununu tasarlamak için bana bir şeyler yaz. Örn: 'FPS player kodu yaz ve 3D tüfek modeli üret.'"}]
 
 fostas = st.session_state.fostas
 
-# Sidebar - File Explorer & Asset Registry
+# --- Dosya Okuma Fonksiyonu ---
+def read_uploaded_file(uploaded_file):
+    if uploaded_file.type == "application/pdf":
+        reader = PdfReader(uploaded_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text()
+        return text
+    elif uploaded_file.name.endswith(".docx"):
+        doc = docx.Document(uploaded_file)
+        return "\n".join([para.text for para in doc.paragraphs])
+    else:
+        return uploaded_file.read().decode("utf-8")
+
+# --- SIDEBAR (Workspace) ---
 with st.sidebar:
     st.header("📁 FOSTAS Workspace")
     
-    # File Explorer (Scripts & Scenes)
-    all_files = list(fostas.project_memory["scripts"].keys()) + list(fostas.project_memory["scenes"].keys())
-    
-    if all_files:
-        selected = st.selectbox("📂 Open File", all_files)
-        st.session_state.selected_file = selected
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("↩️ Undo", use_container_width=True):
-                if fostas.undo_last_version(selected):
-                    st.success("Reverted to previous version!")
-                    st.rerun()
-                else:
-                    st.warning("No previous version to undo.")
-    else:
-        st.write("Henüz dosya yok.")
-        
-    st.markdown("---")
+    # 3D İndirme Listesi
     st.subheader("🎨 3D Asset Registry")
     if fostas.project_memory["assets"]:
         for asset in fostas.project_memory["assets"]:
-            status = "✅ Downloaded" if asset.get("data") else "⏳ Pending"
-            st.write(f"{status} - {asset['name']}")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(f"📦 {asset['name']}")
+            with col2:
+                if asset.get("data"):
+                    st.download_button(
+                        label="⬇️ .glb",
+                        data=asset["data"],
+                        file_name=f"{asset['name'].replace(' ', '_')}.glb",
+                        mime="application/octet-stream"
+                    )
     else:
         st.write("Henüz 3D model yok.")
 
     st.markdown("---")
-    st.subheader("📦 Export Project")
     
-    # ZIP İndirme Mantığı (Geliştirilmiş)
-    if all_files or fostas.project_memory["assets"]:
-        if st.button("⬇️ Prepare Godot Project ZIP", use_container_width=True):
+    # File Explorer
+    st.subheader("📂 Project Files")
+    all_files = list(fostas.project_memory["scripts"].keys()) + list(fostas.project_memory["scenes"].keys())
+    
+    if all_files:
+        selected = st.selectbox("Open File", all_files)
+        st.session_state.selected_file = selected
+        
+        if st.button("↩️ Undo Last Version"):
+            if fostas.undo_last_version(selected):
+                st.success("Reverted!")
+                st.rerun()
+                
+        # Full Project ZIP
+        st.markdown("---")
+        if st.button("📦 Download Full Project ZIP"):
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                # Scriptleri ekle
                 for path, versions in fostas.project_memory["scripts"].items():
-                    latest_code = versions[-1]["code"]
-                    zip_file.writestr(path, latest_code)
-                
-                # Sahneleri ekle
+                    zip_file.writestr(path, versions[-1]["code"])
                 for path, versions in fostas.project_memory["scenes"].items():
-                    latest_code = versions[-1]["code"]
-                    zip_file.writestr(path, latest_code)
-                
-                # 3D Modelleri binary olarak ekle
+                    zip_file.writestr(path, versions[-1]["code"])
                 for asset in fostas.project_memory["assets"]:
                     if asset.get("data"):
-                        # path: "res://assets/fly.glb" -> "assets/fly.glb"
                         clean_path = asset["path"].replace("res://", "")
                         zip_file.writestr(clean_path, asset["data"])
-                
-                # Godot project.godot
-                godot_project = """config_version=5
-[application]
-config/name="FOSTAS OS Project"
-run/main_scene="res://scenes/main.tscn"
-"""
-                zip_file.writestr("project.godot", godot_project)
-                
+                zip_file.writestr("project.godot", 'config_version=5\n[application]\nconfig/name="FOSTAS OS Project"')
             zip_buffer.seek(0)
-            
-            st.download_button(
-                label="⬇️ Download .zip",
-                data=zip_buffer,
-                file_name="fostas_project.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
+            st.download_button("⬇️ Download ZIP", data=zip_buffer, file_name="fostas_project.zip", mime="application/zip")
 
-# Main Dashboard - IDE Area
+# --- ANA EKRAN (Chat ve Oyun Test Ekranı) ---
 st.title("🎮 FOSTAS OS")
 st.subheader("The AI Operating System for AAA Game Development")
-st.markdown("---")
 
-# Prompt Input
-st.header("🚀 Describe your game system")
-user_prompt = st.text_area(
-    "Prompt Input:", 
-    height=100, 
-    placeholder="Örn: Düşman için fly_ai.gd ve sahne dosyası oluştur. Ayrıca 3D sinek modeli üret."
-)
+# Ekrayı İkiye Böl: Sol Sohbet, Sağ Oyun Test
+col_chat, col_game = st.columns([1.5, 1.0])
 
-if st.button("⚡ Run FOSTAS Pipeline", type="primary", use_container_width=True):
-    if user_prompt:
-        output_container = st.empty()
-        full_output = ""
+with col_chat:
+    st.header("💬 AI Chat & Prompt")
+    
+    # Sohbet Geçmişini Göster
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Dosya Ekleme ve Hızlı 3D Model Üretme (Sohbet çubuğunun üstünde)
+    with st.expander("📎 Dosya Ekle veya Hızlı 3D Model Üret"):
+        uploaded_file = st.file_uploader("Geliştirme Dökümanı Yükle (PDF, DOCX, TXT, MD)", type=["pdf", "docx", "txt", "md"])
+        if uploaded_file is not None:
+            if st.button("📄 Dökümanı AI'a Okut"):
+                text = read_uploaded_file(uploaded_file)
+                fostas.upload_document(text)
+                st.session_state.messages.append({"role": "assistant", "content": f"✅ {uploaded_file.name} başarıyla hafızama yüklendi! Artık bu dokümana göre kod yazabilirim."})
+                st.rerun()
         
-        for step_output in fostas.run_fostas_pipeline(user_prompt):
-            full_output += step_output + "\n"
-            output_container.markdown(full_output)
-            
-        st.balloons()
-        st.success("Pipeline Completed! Check the Workspace sidebar to view files.")
-    else:
-        st.warning("Lütfen bir prompt gir.")
+        st.markdown("---")
+        quick_3d_prompt = st.text_input("Hızlı 3D Model Üret:")
+        if st.button("🎨 Generate 3D"):
+            if quick_3d_prompt:
+                st.session_state.messages.append({"role": "user", "content": f"Şu 3D modeli üret: {quick_3d_prompt}"})
+                with st.chat_message("user"):
+                    st.markdown(f"Şu 3D modeli üret: {quick_3d_prompt}")
+                
+                with st.chat_message("assistant"):
+                    response_placeholder = st.empty()
+                    full_response = ""
+                    for step in fostas.generate_3d_asset(quick_3d_prompt):
+                        full_response += step + "\n"
+                        response_placeholder.markdown(full_response + "▌")
+                    response_placeholder.markdown(full_response)
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                st.rerun()
 
-# Code Editor Area
+    # Sohbet Çubuğu (Prompt Input)
+    if prompt := st.chat_input("Ne yapmak istersin? (Örn: FPS player kodu yaz)"):
+        # Kullanıcı mesajını ekrana bas
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # AI Cevabını Üret ve Ekrana Bas
+        with st.chat_message("assistant"):
+            response_placeholder = st.empty()
+            full_response = ""
+            
+            for step_output in fostas.run_fostas_pipeline(prompt):
+                full_response += step_output + "\n"
+                response_placeholder.markdown(full_response + "▌")
+                
+            response_placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+        st.rerun()
+
+with col_game:
+    st.header("🎮 Game Test Screen")
+    st.caption("Oyun kodu tamamlanınca sol menüden ZIP indir, buradaki Godot editörüne sürükle ve anında oyna!")
+    # Godot Web Editor Sağ Tarafta Açık Duruyor
+    st.components.v1.iframe("https://editor.godotengine.org/releases/4.3.stable/godot.editor.html", height=650, scrolling=True)
+
+# --- KOD EDITÖRÜ (Sayfanın En Altı) ---
 st.markdown("---")
 st.header("💻 Code Editor (IDE)")
 
 if st.session_state.selected_file:
     selected = st.session_state.selected_file
-    
-    # Dosya türüne göre kodu getir
     if selected.endswith(".gd") and selected in fostas.project_memory["scripts"]:
         code_data = fostas.project_memory["scripts"][selected][-1]["code"]
     elif selected.endswith(".tscn") and selected in fostas.project_memory["scenes"]:
@@ -146,7 +185,6 @@ if st.session_state.selected_file:
         code_data = "# File not found"
 
     edited_code = st.text_area(f"Editing: {selected}", value=code_data, height=400, key="code_editor")
-    
     if st.button("💾 Save Changes to Memory"):
         if selected.endswith(".gd"):
             v_num = len(fostas.project_memory["scripts"][selected]) + 1
@@ -157,4 +195,4 @@ if st.session_state.selected_file:
         st.success(f"Saved {selected} as version {v_num}!")
         st.rerun()
 else:
-    st.info("Select a file from the Workspace sidebar to view or edit code.")
+    st.info("Sol menüden (Sidebar) bir dosya seçerek kodu düzenleyebilirsin.")
