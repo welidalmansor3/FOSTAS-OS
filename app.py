@@ -74,24 +74,67 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
+    
+    # 3D ASSETS - BİREYSEL İNDİRME BUTONLU
     st.subheader("🎨 3D Asset Registry")
     if fostas.project_memory["assets"]:
         for asset in fostas.project_memory["assets"]:
-            st.write(f"📦 {asset['name']}")
+            col_name, col_dl = st.columns([2, 1])
+            with col_name:
+                st.write(f"📦 {asset['name']}")
+            with col_dl:
+                if asset.get("data"):
+                    st.download_button(
+                        label="⬇️ İndir",
+                        data=asset["data"],
+                        file_name=asset["name"],
+                        key=f"dl_asset_{asset['name']}"
+                    )
     else:
         st.write("Henüz 3D model yok.")
 
     st.markdown("---")
-    st.subheader("📂 Project Files")
+    
+    # SCRIPTS & SCENES - BİREYSEL İNDİRME BUTONLU
+    st.subheader("📂 Project Files (Scripts & Scenes)")
     all_files = list(fostas.project_memory["scripts"].keys()) + list(fostas.project_memory["scenes"].keys())
+    
     if all_files:
-        selected = st.selectbox("Open File", all_files)
+        # 1. IDE'de düzenlemek için dosya seç
+        selected = st.selectbox("Open File in IDE", all_files)
         st.session_state.selected_file = selected
+        
         if st.button("↩️ Undo Last Version"):
             if fostas.undo_last_version(selected):
                 st.success("Reverted!")
                 st.rerun()
+        
         st.markdown("---")
+        st.write("**Dosyaları Tek Tek İndir:**")
+        
+        # 2. Her dosya için ayrı indir butonu
+        for path in fostas.project_memory["scripts"].keys():
+            file_data = fostas.project_memory["scripts"][path][-1]["code"].encode('utf-8')
+            st.download_button(
+                label=f"⬇️ {path}",
+                data=file_data,
+                file_name=os.path.basename(path),
+                mime="text/plain",
+                key=f"dl_script_{path}"
+            )
+            
+        for path in fostas.project_memory["scenes"].keys():
+            file_data = fostas.project_memory["scenes"][path][-1]["code"].encode('utf-8')
+            st.download_button(
+                label=f"⬇️ {path}",
+                data=file_data,
+                file_name=os.path.basename(path),
+                mime="text/plain",
+                key=f"dl_scene_{path}"
+            )
+            
+        st.markdown("---")
+        # 3. Hepsini birden ZIP olarak indir
         if st.button("📦 Download Full Project ZIP"):
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
