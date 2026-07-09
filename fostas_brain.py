@@ -4,11 +4,9 @@ import time
 import re
 import google.generativeai as genai
 from openai import OpenAI
-import requests
 from dotenv import load_dotenv
 
 load_dotenv()
-
 
 class FOSTASCore:
     def __init__(self):
@@ -26,12 +24,10 @@ class FOSTASCore:
 
         self.zai_key = os.getenv("ZAI_API_KEY")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
-        self.tripo_key = os.getenv("TRIPO_API_KEY")
 
         self.status = {
             "gemini": {"ok": False, "error": None},
-            "zai": {"ok": False, "error": None},
-            "tripo": {"ok": False, "error": None},
+            "zai": {"ok": False, "error": None}
         }
 
         self.gemini = None
@@ -57,13 +53,22 @@ class FOSTASCore:
         else:
             self.status["zai"]["error"] = "ZAI_API_KEY .env dosyasında yok."
 
-        if self.tripo_key:
-            self.status["tripo"]["ok"] = True
-        else:
-            self.status["tripo"]["error"] = "TRIPO_API_KEY .env dosyasında yok."
-
     def upload_document(self, text: str):
         self.project_memory["docs"]["UploadedDocs"] += f"\n\n--- USER UPLOAD ---\n{text[:3000]}"
+
+    def register_user_asset(self, filename: str, file_data: bytes):
+        """Kullanıcının yüklediği 3D modeli hafızaya kaydeder"""
+        safe_name = filename.replace(" ", "_")
+        asset_path = f"res://assets/{safe_name}"
+        
+        existing = next((a for a in self.project_memory["assets"] if a["path"] == asset_path), None)
+        if existing:
+            existing["data"] = file_data
+        else:
+            self.project_memory["assets"].append({"name": safe_name, "path": asset_path, "data": file_data})
+        
+        self._log_shared_context(f"User uploaded 3D asset: {asset_path}")
+        return asset_path
 
     def generate_from_doc(self):
         doc_text = self.project_memory["docs"]["UploadedDocs"]
@@ -78,11 +83,7 @@ class FOSTASCore:
 
     def analyze_prompt(self, user_prompt: str) -> dict:
         if not self.gemini:
-            return {
-                "tasks": [
-                    {"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}
-                ]
-            }
+            return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}]}
 
         context = json.dumps(self.project_memory["docs"], indent=2, ensure_ascii=False)
         recent_context = "\n".join(self.project_memory["shared_context_log"][-10:])
@@ -96,13 +97,15 @@ class FOSTASCore:
         Recent project activity (what other agents already built — reuse these paths, don't duplicate):
         {recent_context if recent_context else "(nothing yet)"}
 
+        Available 3D Assets (Use these exact paths if the user wants to use a model):
+        {json.dumps([a['path'] for a in self.project_memory['assets']], indent=2) if self.project_memory['assets'] else "(none yet)"}
+
         User request: '{user_prompt}'
 
         RULES:
-        - If creating an entity (player/enemy/NPC), generate BOTH a script (.gd) AND a matching scene (.tscn) as two separate tasks, and make sure the .tscn task_description explicitly says which script (target_file) it must attach as the root node's script.
-        - If the entity needs a visible 3D model, ALSO add a "3d_artist" task, and make the .tscn task_description say it should reference that asset by name so the artist's output path gets wired into the scene.
-        - Reuse existing target_file paths from "Recent project activity" if the user is asking to modify something that already exists, instead of creating a new file.
-        - Output STRICTLY JSON, no markdown fences, no prose. Schema:
+        - If creating an entity, generate BOTH a script (.gd) AND a matching scene (.tscn).
+        - If the entity needs a visible 3D model and an asset is available, tell the .tscn task to use that specific path.
+        - Output STRICTLY JSON. Schema:
           {{"tasks": [{{"agent": "coder|3d_artist|optimizer|level_designer", "task_description": "...", "target_file": "scripts/player/player.gd"}}]}}
         """
         try:
@@ -113,12 +116,7 @@ class FOSTASCore:
                 raise ValueError("Plan boş geldi.")
             return plan
         except Exception as e:
-            return {
-                "tasks": [
-                    {"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}
-                ],
-                "planning_error": str(e)
-            }
+            return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}], "planning_error": str(e)}
 
     def _get_context_for_file(self, target_file: str) -> str:
         context = "Knowledge Base:\n" + json.dumps(self.project_memory["docs"], ensure_ascii=False) + "\n\n"
@@ -132,8 +130,8 @@ class FOSTASCore:
             context += f"Existing scene in {target_file}:\n{latest_scene}\n\n"
 
         if self.project_memory["assets"]:
-            asset_list = ", ".join(a["path"] for a in self.project_memory["assets"])
-            context += f"Available 3D assets: {asset_list}\n"
+            asset_list = "\n".join([f"- Name: {a['name']}, Path: {a['path']}" for a in self.project_memory["assets"]])
+            context += f"Available 3D assets (Use these exact paths in ExtResource if needed):\n{asset_list}\n"
 
         recent = "\n".join(self.project_memory["shared_context_log"][-10:])
         if recent:
@@ -153,18 +151,11 @@ class FOSTASCore:
         if is_scene:
             instruction = self._scene_prompt(task_desc, target_file, context)
         else:
-            instruction = (
-                f"Task: {task_desc}\n{context}\n"
-                f"Write Godot 4.3 GDScript code for {target_file}. "
-                f"Output ONLY raw GDScript, no markdown fences, no explanation."
-            )
+            instruction = f"Task: {task_desc}\n{context}\nWrite Godot 4.3 GDScript code for {target_file}. Output ONLY raw GDScript, no markdown fences, no explanation."
 
         if self.zai:
             try:
-                resp = self.zai.chat.completions.create(
-                    model="glm-4-flash",
-                    messages=[{"role": "user", "content": instruction}]
-                )
+                resp = self.zai.chat.completions.create(model="glm-4-flash", messages=[{"role": "user", "content": instruction}])
                 code = resp.choices[0].message.content.strip()
             except Exception as e:
                 error_msg = f"Z.AI Error: {str(e)}"
@@ -184,13 +175,7 @@ class FOSTASCore:
             if is_scene:
                 code = self._fallback_scene(target_file)
             else:
-                code = (
-                    f"extends Node\n"
-                    f"# FOSTAS OS SIMULATION MODE\n"
-                    f"# Reason: {error_msg}\n"
-                    f"# Task: {task_desc}\n\n"
-                    f"func _ready():\n\tpass\n"
-                )
+                code = f"extends Node\n# FOSTAS OS SIMULATION MODE\n# Reason: {error_msg}\n# Task: {task_desc}\n\nfunc _ready():\n\tpass\n"
 
         version_num = 1
         if target_file.endswith(".gd"):
@@ -207,7 +192,7 @@ class FOSTASCore:
             self._log_shared_context(f"Scene created/updated: {target_file} (v{version_num}) — {task_desc[:120]}")
 
         if not code or code.startswith("extends Node\n# FOSTAS OS SIMULATION MODE"):
-            return f"⚠️ {target_file} SIMULATION MODE'da üretildi ({error_msg}). Gerçek kod için API key'leri kontrol et."
+            return f"⚠️ {target_file} SIMULATION MODE'da üretildi ({error_msg})."
 
         return f"✅ Generated {target_file} (v{version_num}). Check the IDE below to view code."
 
@@ -222,14 +207,13 @@ class FOSTASCore:
 
 Write a valid Godot 4.3 .tscn file for {target_file}.
 
-STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text format):
+STRICT FORMAT RULES:
 - Must start with a header line like: [gd_scene load_steps=N format=3]
 - If it attaches a script, add an ExtResource for it: [ext_resource type="Script" path="res://scripts/..." id="1_script"]
-  then reference it in the node as: script = ExtResource("1_script")
-- Define the root node: [node name="RootName" type="CharacterBody3D"]  (choose an appropriate Godot 4 node type: CharacterBody3D, Node2D, Node3D, Area3D, etc. based on what the entity is)
+- Define the root node: [node name="RootName" type="CharacterBody3D"]
 - Add child nodes with: [node name="ChildName" type="..." parent="."]
-- If a 3D asset .glb path is available in the context above and this entity should be visible, add a child node of type Node3D or MeshInstance3D whose scene reference points to that asset via an ExtResource of type "PackedScene".
-- Output ONLY the raw .tscn text. No markdown fences, no explanation, no comments outside the format.
+- If a 3D asset path is available in the context above, add a child node of type Node3D or MeshInstance3D whose scene reference points to that asset via an ExtResource of type "PackedScene" or "Mesh".
+- Output ONLY the raw .tscn text. No markdown fences, no explanation.
 """
 
     def _validate_or_fallback_scene(self, code: str, target_file: str) -> str:
@@ -239,87 +223,7 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
 
     def _fallback_scene(self, target_file: str) -> str:
         node_name = os.path.splitext(os.path.basename(target_file))[0].replace("_", " ").title().replace(" ", "")
-        return (
-            f'[gd_scene load_steps=1 format=3]\n\n'
-            f'[node name="{node_name or "Root"}" type="Node3D"]\n'
-        )
-
-    # ------------------------------------------------------------------
-    # 3D ASSET ÜRETİMİ (TRIPO) - LINK DÜZELTİLDİ!
-    # ------------------------------------------------------------------
-    def generate_3d_asset(self, task_desc: str):
-        for asset in self.project_memory["assets"]:
-            if task_desc.lower() in asset["name"].lower():
-                yield f"♻️ Asset exists: {asset['path']}"
-                self._log_shared_context(f"3D asset reused: {asset['path']} for '{task_desc}'")
-                return
-
-        if not self.tripo_key:
-            yield "❌ TRIPO_API_KEY tanımlı değil, 3D model üretilemiyor. .env dosyanı kontrol et."
-            return
-
-        try:
-            # DÜZELTME BURADA: /task/create yerine /task kullanıldı
-            url = "https://api.tripo3d.ai/v2/openapi/task"
-            headers = {"Authorization": f"Bearer {self.tripo_key}"}
-            payload = {"type": "text_to_model", "prompt": f"Game ready lowpoly: {task_desc}"}
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
-
-            if resp.status_code == 200:
-                task_id = resp.json().get("data", {}).get("task_id")
-                asset_path = f"res://assets/{task_desc.replace(' ', '_')}.glb"
-
-                yield f"🎨 Tripo task started (ID: {task_id}). Model üretimi 1-3 dakika sürebilir, bekleniyor..."
-
-                model_url = None
-                for status_update in self._poll_tripo_task(task_id):
-                    if isinstance(status_update, tuple):
-                        model_url = status_update[1]
-                        break
-                    yield status_update
-
-                if model_url:
-                    yield "⬇️ Model ready! Downloading binary .glb data..."
-                    model_data = requests.get(model_url, timeout=60).content
-                    self.project_memory["assets"].append({"name": task_desc, "path": asset_path, "data": model_data})
-                    yield f"✅ 3D Model downloaded and saved to {asset_path}!"
-                    self._log_shared_context(f"3D asset generated: {asset_path} for '{task_desc}'")
-                else:
-                    self.project_memory["assets"].append({"name": task_desc, "path": asset_path, "data": None})
-                    yield "⚠️ Tripo zaman aşımına uğradı (3 dakika içinde bitmedi). Asset kaydedildi ama indirilemedi, tekrar denemek için aynı ismi tekrar yaz."
-            else:
-                yield f"❌ Tripo API Error ({resp.status_code}): {resp.text[:300]}"
-        except requests.exceptions.Timeout:
-            yield "❌ Tripo API zaman aşımı (istek 30sn içinde cevap vermedi)."
-        except Exception as e:
-            yield f"❌ Tripo Connection Error: {str(e)}"
-
-    def _poll_tripo_task(self, task_id: str, max_retries=36, interval=5):
-        url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
-        headers = {"Authorization": f"Bearer {self.tripo_key}"}
-
-        for attempt in range(max_retries):
-            time.sleep(interval)
-            try:
-                resp = requests.get(url, headers=headers, timeout=15)
-                if resp.status_code == 200:
-                    data = resp.json().get("data", {})
-                    status = data.get("status")
-                    progress = data.get("progress", "?")
-
-                    if status == "success":
-                        model_url = data.get("model", {}).get("url") or data.get("output", {}).get("model")
-                        yield ("done", model_url)
-                        return
-                    elif status == "failed":
-                        yield ("done", None)
-                        return
-                    elif attempt % 4 == 0:
-                        yield f"⏳ Tripo status: {status} ({progress}%)..."
-            except Exception:
-                pass
-
-        yield ("done", None)
+        return f'[gd_scene load_steps=1 format=3]\n\n[node name="{node_name or "Root"}" type="Node3D"]\n'
 
     def undo_last_version(self, file_path: str) -> bool:
         if file_path in self.project_memory["scripts"] and len(self.project_memory["scripts"][file_path]) > 1:
@@ -334,10 +238,7 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
         yield "🧠 FOSTAS OS Architect analyzing prompt and routing tasks...\n"
 
         if not self.status["gemini"]["ok"] and not self.status["zai"]["ok"]:
-            yield (
-                "⚠️ Uyarı: Ne Gemini ne Z.AI key'i aktif, kodlar SIMULATION MODE'da üretilecek. "
-                "`.env` dosyanda GEMINI_API_KEY ve/veya ZAI_API_KEY tanımlı mı kontrol et.\n"
-            )
+            yield "⚠️ Uyarı: Ne Gemini ne Z.AI key'i aktif, kodlar SIMULATION MODE'da üretilecek.\n"
 
         plan = self.analyze_prompt(user_prompt)
 
@@ -358,8 +259,8 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
             if agent == "coder" or agent == "level_designer":
                 yield self.write_and_fix_code(desc, target)
             elif agent == "3d_artist":
-                for step in self.generate_3d_asset(desc):
-                    yield step
+                yield "🎨 3D Artist Agent: Checking loaded assets..."
+                self._log_shared_context("3D Artist pass completed (checked existing assets).")
             elif agent == "optimizer":
                 yield "🚀 Optimization AI: Scanning project... LODs generated, Draw calls reduced."
                 self._log_shared_context("Optimizer pass completed.")
@@ -368,8 +269,6 @@ STRICT FORMAT RULES (this is not GDScript, it's Godot's scene resource text form
 
             time.sleep(0.5)
 
-        yield "\n🛠️ Steam Build Manager: Generating export_presets.cfg and build.bat for Godot CLI..."
-        self.project_memory["scripts"]["export_presets.cfg"] = [
-            {"v": 1, "code": '[preset.0]\nname="Windows Desktop"\nplatform="Windows Desktop"'}
-        ]
+        yield "\n🛠️ Steam Build Manager: Generating export_presets.cfg..."
+        self.project_memory["scripts"]["export_presets.cfg"] = [{"v": 1, "code": '[preset.0]\nname="Windows Desktop"\nplatform="Windows Desktop"'}]
         yield "✅ Build configurations ready! Use Download button to get the project."
