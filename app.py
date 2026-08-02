@@ -157,7 +157,7 @@ with tab1:
             
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
-            response_placeholder.markdown("🧠 NVIDIA GLM-5.2 devreye giriyor, oyun ve fizik kodları yazılıyor... ⏳")
+            response_placeholder.markdown("🧠 NVIDIA Tüm Ajanlar (Llama, DeepSeek, GLM, GPT-OSS) devreye giriyor... ⏳")
             success = fostas.generate_game(prompt)
             if success:
                 response_placeholder.markdown("✅ Oyun hazır! Üstteki **'🕹️ Oyunu Dene'** sekmesine geç!")
@@ -169,18 +169,17 @@ with tab1:
 with tab2:
     st.header("🕹️ Oyun Alanı")
     
-    if fostas.game_html:
-        # iframe srcdoc ile gösterim (buton sorunu kesin çözüm)
-        components.html(fostas.game_html, height=650, scrolling=False)
+    # Çift iframe YOK! Direkt AI'ın yazdığı temiz HTML'i components.html içine veriyoruz.
+    if fostas.raw_game_html:
+        components.html(fostas.raw_game_html, height=650, scrolling=False)
         
         # OYUNU İNDİRME BUTONU
         st.markdown("---")
-        if fostas.raw_game_html:
-            st.download_button(
-                label="⬇️ Oyunu Bilgisayara İndir (HTML)",
-                data=fostas.raw_game_html.encode('utf-8'),
-                file_name="fostas_oyunum.html",
-                mime="text/html"
-            )
+        st.download_button(
+            label="⬇️ Oyunu Bilgisayara İndir (HTML)",
+            data=fostas.raw_game_html.encode('utf-8'),
+            file_name="fostas_oyunum.html",
+            mime="text/html"
+        )
     else:
         st.warning("Henüz bir oyun üretilmedi. Lütfen 'Oyun Üret' sekmesine git ve bir oyun fikri yaz!")
