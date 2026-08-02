@@ -30,7 +30,7 @@ st.markdown("""
 if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
 if 'messages' not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Kanka hoş geldin! 3D modelini sol menüden yükle, sonra bana 'Bu arabayla bir oyun yap' yaz. Oyunu anında 'Oyna' sekmesinde oynarız!"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Kanka hoş geldin! 3D modelini sol menüden yükle (ZIP de olabilir), sonra bana 'Bu arabayla bir araba oyunu yap' yaz. Oyunu anında 'Oyna' sekmesinde oynarız!"}]
 
 fostas = st.session_state.fostas
 
@@ -63,23 +63,32 @@ with st.sidebar:
         st.markdown(f"<span style='color:{color}'>●</span> {engine_name}: {text}", unsafe_allow_html=True)
     st.markdown("---")
 
-    st.subheader("📥 3D Model Yükle (.glb)")
-    st.warning("Sadece 1 model yükle, AI onu oyuna koyar. (Max ~2MB)")
-    uploaded_3d = st.file_uploader("Model Yükle", type=["glb", "gltf"], key="3d_uploader")
+    st.subheader("📥 3D Model Yükle (Max 200MB)")
+    st.warning("ZIP, GLB veya GLTF yükleyebilirsin. ZIP içindeki modeller otomatik çıkar.")
+    uploaded_3d = st.file_uploader("Model Yükle", type=["zip", "glb", "gltf"], key="3d_uploader")
     
     if uploaded_3d is not None:
-        fostas.register_user_asset(uploaded_3d.name, uploaded_3d.getvalue())
-        st.success(f"Yüklendi: {uploaded_3d.name}")
+        if uploaded_3d.name.endswith(".zip"):
+            with zipfile.ZipFile(uploaded_3d) as z:
+                for filename in z.namelist():
+                    if filename.endswith((".glb", ".gltf")):
+                        file_data = z.read(filename)
+                        safe_name = os.path.basename(filename)
+                        fostas.register_user_asset(safe_name, file_data)
+                        st.success(f"ZIP'ten çıkarıldı: {safe_name}")
+        else:
+            fostas.register_user_asset(uploaded_3d.name, uploaded_3d.getvalue())
+            st.success(f"Yüklendi: {uploaded_3d.name}")
         st.rerun()
 
     st.markdown("---")
     
-    st.subheader("🎨 Yüklü Model")
+    st.subheader("🎨 Yüklü Dosyalar (İndir)")
     if fostas.project_memory["assets"]:
         for asset in fostas.project_memory["assets"]:
             st.write(f"📦 {asset['name']}")
             st.download_button(
-                label="⬇️ Modeli İndir",
+                label=f"⬇️ {asset['name']} İndir",
                 data=asset["data"],
                 file_name=asset["name"],
                 key=f"dl_asset_{asset['name']}"
@@ -119,7 +128,7 @@ with tab1:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ne oyunu yapalım? (Örn: Yüklediğim arabayla 2D bir araba oyunu yap)"):
+    if prompt := st.chat_input("Ne oyunu yapalım? (Örn: Yüklediğim modelle bir korku oyunu yap)"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -137,7 +146,7 @@ with tab1:
 
 with tab2:
     st.header("🕹️ Oyun Alanı")
-    st.write("Ürettiğin oyun aşağıda yüklenecek. Bekleyin yükleniyorsa biraz zaman alabilir...")
+    st.write("Ürettiğin oyun aşağıda yüklenecek. 'Başla' butonuna bastığında oyunun çalışması gerekir.")
     
     if fostas.game_html:
         components.html(fostas.game_html, height=650, scrolling=False)
