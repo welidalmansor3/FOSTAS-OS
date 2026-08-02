@@ -150,87 +150,18 @@ class FOSTASCore:
         
         code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
         
-        # Eğer GLM başarısız olursa, DeepSeek'in yazmasını istiyoruz (Fallback)
+        # Eğer GLM başarısız olursa (çekilirsek), DeepSeek'in yazmasını istiyoruz
         if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
             code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", glm_prompt, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
 
         # =====================================================================
-        # AŞAMA 4: GPT-OSS İLE KODU KONTROL ETME (KALİTE KONTROL)
+        # AŞAMA 4: GPT-OSS İLE KODU KONTROL ETME VE DÜZELTME (KALİTE KONTROL)
         # =====================================================================
-        # Eğer hala kod yoksa GPT-OSS devreye girer
-        if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
-            code = self._nvidia_chat("gpt_oss", "openai/gpt-oss-120b", glm_prompt, max_tokens=4000)
-
-        # Markdown temizliği
-        code = re.sub(r"^```html\n?", "", code.strip())
-        code = re.sub(r"\n?```$", "", code.strip())
-
-        # Modeli HTML'e göm
-        if model_b64:
-            code = code.replace("MODEL_BASE64_PLACEHOLDER", f"data:application/octet-stream;base64,{model_b64}")
-
         if "<!DOCTYPE html>" in code or "<html>" in code:
-            # Enforcer Script (Buton her halükarda çalışsın diye)
-            enforcer_script = """
-            <script>
-            let _gameInitialized = false;
-            let _gameStarted = false;
-
-            document.addEventListener('DOMContentLoaded', setupGameButton);
-
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', setupGameButton);
-            } else {
-                setupGameButton();
-            }
-
-            function setupGameButton() {
-                if (_gameInitialized) return;
-                _gameInitialized = true;
-
-                let btn = document.getElementById('startBtn') || document.querySelector('button');
-                let startScreen = document.getElementById('startScreen');
-                
-                if (btn) {
-                    let newBtn = btn.cloneNode(true);
-                    btn.parentNode.replaceChild(newBtn, btn);
-                    btn = newBtn;
-
-                    btn.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        if (startScreen) startScreen.style.display = 'none';
-
-                        if (typeof initGame === 'function') { initGame(); _gameStarted = true; }
-                        else if (typeof startGame === 'function') { startGame(); _gameStarted = true; }
-                        else if (typeof start === 'function') { start(); _gameStarted = true; }
-                        else if (typeof beginGame === 'function') { beginGame(); _gameStarted = true; }
-
-                        if (typeof animate === 'function' && !window.gameStarted && !_gameStarted) {
-                            window.gameStarted = true;
-                            _gameStarted = true;
-                            animate();
-                        }
-                    });
-                    btn.style.cursor = 'pointer';
-                }
-            }
-            </script>
-            """
-            
-            if "</body>" in code:
-                code = code.replace("</body>", enforcer_script + "\n</body>")
-            else:
-                code += enforcer_script
-
-            self.raw_game_html = code
-            
-            # Base64 Data URI ile iframe gösterimi
-            encoded_html = base64.b64encode(code.encode('utf-8')).decode('utf-8')
-            self.game_html = f'<iframe src="data:text/html;base64,{encoded_html}" style="width:100%;height:650px;border:none;overflow:hidden;"></iframe>'
-            
-            return True
-        
-        self.game_html = "<h1 style='color:red;text-align:center;'>Oyun üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
-        return False
+            gpt_oss_prompt = f"""
+            You are the QA Engineer. Review the following HTML5 game code.
+            Ensure it strictly has:
+            1. A start button with id="startBtn".
+            2. A start screen with id="startScreen".
+            3. The game loop is NOT auto-starting (no direct call to animate() on load).
+            4. The startBtn correctly hides the startScreen and calls initGame().
