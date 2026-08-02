@@ -30,7 +30,7 @@ st.markdown("""
 if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
 if 'messages' not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Kanka hoş geldin! 3D modelini sol menüden yükle (ZIP de olabilir), sonra bana 'Bu arabayla bir araba oyunu yap' yaz. Oyunu anında 'Oyna' sekmesinde oynarız!"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Kanka hoş geldin! 3D modelini yükle, bir şablon seç veya kendi fikrini yaz. Oyunu anında 'Oyna' sekmesinde oynar ve bilgisayarına indirebilirsin!"}]
 
 fostas = st.session_state.fostas
 
@@ -64,7 +64,7 @@ with st.sidebar:
     st.markdown("---")
 
     st.subheader("📥 3D Model Yükle (Max 200MB)")
-    st.warning("ZIP, GLB veya GLTF yükleyebilirsin. ZIP içindeki modeller otomatik çıkar.")
+    st.warning("ZIP, GLB veya GLTF yükleyebilirsin.")
     uploaded_3d = st.file_uploader("Model Yükle", type=["zip", "glb", "gltf"], key="3d_uploader")
     
     if uploaded_3d is not None:
@@ -98,13 +98,30 @@ with st.sidebar:
 
 # ANA EKRAN
 st.title("🎮 FOSTAS OS - AI Game Studio")
-st.subheader("Modelini Yükle, Promptunu Yaz, Oyna!")
+st.subheader("Irak'ın Oyun Endüstrisine Açılan Kapı 🇮🇶")
 
-tab1, tab2 = st.tabs(["🛠️ Oyun Üret (Prompt / PDF)", "🕹️ Oyunu Dene (Play)"])
+tab1, tab2 = st.tabs(["🛠️ Oyun Üret", "🕹️ Oyunu Dene ve İndir"])
 
 with tab1:
     st.header("💬 Oyun Fikrini Yaz veya Yükle")
     
+    # ŞABLLOLAR (PATLATICI ÖZELLİK)
+    st.subheader("🚀 Hızlı Başlangıç Şablonları")
+    templates = [
+        "Serbest (Kendi Promptunu Yaz)",
+        "2D Araba Yarışı Oyunu (Fizikli)",
+        "Gerilim Korku Oyunu (Karanlık ortam, el feneri)",
+        "Platform Oyunu (Mario gibi zıplamalı)",
+        "Uzay Saldırısı (Meteorlara ateş et)",
+        "3D Birinci Şahıs FPS Savaşı"
+    ]
+    selected_template = st.selectbox("Bir şablon seç veya kendi promptunu yaz:", templates)
+    
+    if selected_template != "Serbest (Kendi Promptunu Yaz)":
+        prefilled_prompt = selected_template
+    else:
+        prefilled_prompt = ""
+
     with st.expander("📎 Doküman Yükle (GDD / Fikir)"):
         uploaded_file = st.file_uploader("PDF, DOCX, TXT, MD", type=["pdf", "docx", "txt", "md"], label_visibility="collapsed")
         if uploaded_file is not None:
@@ -119,7 +136,7 @@ with tab1:
                     response_placeholder.markdown("🧠 Döküman okunuyor ve NVIDIA modelleriyle oyun yazılıyor... ⏳")
                     success = fostas.generate_game_from_doc()
                     if success:
-                        response_placeholder.markdown("✅ Oyun hazır! Üstteki **'🕹️ Oyunu Dene (Play)'** sekmesine geç!")
+                        response_placeholder.markdown("✅ Oyun hazır! **'🕹️ Oyunu Dene'** sekmesine geç!")
                     else:
                         response_placeholder.markdown("⚠️ Oyun üretilirken bir sorun oluştu.")
                 st.rerun()
@@ -128,7 +145,10 @@ with tab1:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ne oyunu yapalım? (Örn: Yüklediğim modelle bir korku oyunu yap)"):
+    # Chat input kısmına şablonu yerleştirme
+    prompt = st.chat_input("Ne oyunu yapalım?", value=prefilled_prompt if prefilled_prompt else None)
+    
+    if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -138,7 +158,7 @@ with tab1:
             response_placeholder.markdown("🧠 NVIDIA GLM-5.2 devreye giriyor, oyun ve fizik kodları yazılıyor... ⏳")
             success = fostas.generate_game(prompt)
             if success:
-                response_placeholder.markdown("✅ Oyun hazır! Üstteki **'🕹️ Oyunu Dene (Play)'** sekmesine geçip hemen oynayabilirsin!")
+                response_placeholder.markdown("✅ Oyun hazır! Üstteki **'🕹️ Oyunu Dene'** sekmesine geç!")
                 st.session_state.messages.append({"role": "assistant", "content": "✅ Oyun hazır! 'Oyunu Dene' sekmesine geç."})
             else:
                 response_placeholder.markdown("⚠️ Oyun üretilirken bir sorun oluştu. Lütfen farklı bir prompt dene.")
@@ -146,9 +166,19 @@ with tab1:
 
 with tab2:
     st.header("🕹️ Oyun Alanı")
-    st.write("Ürettiğin oyun aşağıda yüklenecek. 'Başla' butonuna bastığında oyunun çalışması gerekir.")
     
     if fostas.game_html:
+        # iframe srcdoc ile gösterim (buton sorunu kesin çözüm)
         components.html(fostas.game_html, height=650, scrolling=False)
+        
+        # PATLATICI ÖZELLİK 2: OYUNU İNDİRME BUTONU
+        st.markdown("---")
+        if fostas.raw_game_html:
+            st.download_button(
+                label="⬇️ Oyunu Bilgisayara İndir (HTML)",
+                data=fostas.raw_game_html.encode('utf-8'),
+                file_name="fostas_oyunum.html",
+                mime="text/html"
+            )
     else:
         st.warning("Henüz bir oyun üretilmedi. Lütfen 'Oyun Üret' sekmesine git ve bir oyun fikri yaz!")
