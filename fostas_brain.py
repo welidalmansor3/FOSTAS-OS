@@ -1,5 +1,4 @@
 import os
-import json
 import re
 import base64
 from openai import OpenAI
@@ -9,8 +8,7 @@ load_dotenv()
 
 class FOSTASCore:
     def __init__(self):
-        self.game_html = ""
-        self.raw_game_html = ""
+        self.raw_game_html = "" # Sadece temiz HTML tutulacak, iframe enjeksiyonu yok.
         self.project_memory = {
             "assets": [], 
             "docs": ""
@@ -171,7 +169,6 @@ class FOSTASCore:
             
             reviewed_code = self._nvidia_chat("gpt_oss", "openai/gpt-oss-120b", gpt_oss_prompt, max_tokens=8000)
             
-            # Eğer GPT-OSS başarılı bir düzeltme yaptıysa, onun kodunu kullanıyoruz
             if "<!DOCTYPE html>" in reviewed_code or "<html>" in reviewed_code:
                 code = reviewed_code
 
@@ -183,68 +180,11 @@ class FOSTASCore:
         if model_b64:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
 
+        # ARTIK HİÇBİR JAVASCRIPT ENJEKSİYONU YAPILMIYOR!
+        # AI'ın yazdığı kod direkt kabul ediliyor.
         if "<!DOCTYPE html>" in code or "<html>" in code:
-            # Enforcer Script (Buton her halükarda çalışsın diye)
-            enforcer_script = """
-<script>
-let _gameInitialized = false;
-let _gameStarted = false;
-
-document.addEventListener('DOMContentLoaded', setupGameButton);
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', setupGameButton);
-} else {
-    setupGameButton();
-}
-
-function setupGameButton() {
-    if (_gameInitialized) return;
-    _gameInitialized = true;
-
-    let btn = document.getElementById('startBtn') || document.querySelector('button');
-    let startScreen = document.getElementById('startScreen');
-    
-    if (btn) {
-        let newBtn = btn.cloneNode(true);
-        btn.parentNode.replaceChild(newBtn, btn);
-        btn = newBtn;
-
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            if (startScreen) startScreen.style.display = 'none';
-
-            if (typeof initGame === 'function') { initGame(); _gameStarted = true; }
-            else if (typeof startGame === 'function') { startGame(); _gameStarted = true; }
-            else if (typeof start === 'function') { start(); _gameStarted = true; }
-            else if (typeof beginGame === 'function') { beginGame(); _gameStarted = true; }
-
-            if (typeof animate === 'function' && !window.gameStarted && !_gameStarted) {
-                window.gameStarted = true;
-                _gameStarted = true;
-                animate();
-            }
-        });
-        btn.style.cursor = 'pointer';
-    }
-}
-</script>
-"""
-            
-            if "</body>" in code:
-                code = code.replace("</body>", enforcer_script + "\n</body>")
-            else:
-                code += enforcer_script
-
             self.raw_game_html = code
-            
-            # Base64 Data URI ile iframe gösterimi
-            encoded_html = base64.b64encode(code.encode('utf-8')).decode('utf-8')
-            self.game_html = '<iframe src="data:text/html;base64,' + encoded_html + '" style="width:100%;height:650px;border:none;overflow:hidden;"></iframe>'
-            
             return True
         
-        self.game_html = "<h1 style='color:red;text-align:center;'>Oyun üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
+        self.raw_game_html = "<h1 style='color:red;text-align:center;'>Oyun üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
         return False
