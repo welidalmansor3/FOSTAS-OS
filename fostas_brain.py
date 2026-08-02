@@ -142,12 +142,14 @@ class FOSTASCore:
         # 1. GLM-5.2 ile üret
         code = self._nvidia_chat("glm", "z-ai/glm-5.2", system_prompt, max_tokens=8000, temperature=0.8)
         
-        # 2. Hata varsa DeepSeek
-        if "API Hatası" in code or len(code) < 100:
+        # GÜÇLENDİRİLMİŞ FALLBACK KONTROLÜ
+        # Eğer API hatası varsa, kod çok kısa ise VEYA içinde <!DOCTYPE yoksa diğer modele geç
+        if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
+            # 2. DeepSeek ile dene
             code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", system_prompt, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
         
-        # 3. O da olmazsa Llama
-        if "API Hatası" in code or len(code) < 100:
+        if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
+            # 3. Llama ile dene
             code = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", system_prompt, max_tokens=4000, temperature=0.7)
 
         # Markdown temizliği
@@ -159,18 +161,14 @@ class FOSTASCore:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", f"data:application/octet-stream;base64,{model_b64}")
 
         if "<!DOCTYPE html>" in code or "<html>" in code:
-            # ÇÖZÜM 1: DOMContentLoaded kullanarak proper event binding
-            # ÇÖZÜM 2: Backup event listener ekleyerek multiple trigger
-            # ÇÖZÜM 3: Game loop control mekanizması
+            # DOMContentLoaded + Fallback + Game loop control
             enforcer_script = """
             <script>
             let _gameInitialized = false;
             let _gameStarted = false;
 
-            // ÇÖZÜM 1: DOMContentLoaded ile güvenli binding
             document.addEventListener('DOMContentLoaded', setupGameButton);
 
-            // ÇÖZÜM 2: Fallback - window.onload da çalışsın
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', setupGameButton);
             } else {
@@ -178,14 +176,13 @@ class FOSTASCore:
             }
 
             function setupGameButton() {
-                if (_gameInitialized) return; // İki kez çalışmasını önle
+                if (_gameInitialized) return;
                 _gameInitialized = true;
 
                 let btn = document.getElementById('startBtn') || document.querySelector('button');
                 let startScreen = document.getElementById('startScreen');
                 
                 if (btn) {
-                    // Eski event listener'ları temizle
                     let newBtn = btn.cloneNode(true);
                     btn.parentNode.replaceChild(newBtn, btn);
                     btn = newBtn;
@@ -198,7 +195,6 @@ class FOSTASCore:
                             startScreen.style.display = 'none';
                         }
 
-                        // AI'ın yazdığı olası tüm başlatma fonksiyonlarını deniyoruz
                         if (typeof initGame === 'function') {
                             initGame();
                             _gameStarted = true;
@@ -213,7 +209,6 @@ class FOSTASCore:
                             _gameStarted = true;
                         }
 
-                        // Eğer AI animate() fonksiyonunu yazmışsa başlatıyoruz
                         if (typeof animate === 'function' && !window.gameStarted && !_gameStarted) {
                             window.gameStarted = true;
                             _gameStarted = true;
@@ -221,14 +216,12 @@ class FOSTASCore:
                         }
                     });
 
-                    // Ek: button hover ve focus state'lerini ekle
                     btn.style.cursor = 'pointer';
                 }
             }
             </script>
             """
             
-            # Eğer AI </body> etiketini kullandıysa hemen öncesine, kullanmadıysa en sona ekle
             if "</body>" in code:
                 code = code.replace("</body>", enforcer_script + "\n</body>")
             else:
@@ -236,8 +229,7 @@ class FOSTASCore:
 
             self.raw_game_html = code # İndirme butonu için temiz HTML
             
-            # ÇÖZÜM: iframe srcdoc yerine data URI kullan (HTML5 sandbox uyumlu)
-            # HTML'i base64 encode et
+            # Base64 Data URI yöntemi (srcdoc ve escape yok!)
             encoded_html = base64.b64encode(code.encode('utf-8')).decode('utf-8')
             self.game_html = f'<iframe src="data:text/html;base64,{encoded_html}" style="width:100%;height:650px;border:none;overflow:hidden;"></iframe>'
             
