@@ -11,7 +11,7 @@ class FOSTASCore:
     def __init__(self):
         self.game_html = ""
         self.project_memory = {
-            "assets": [], # Yüklenen modellerin hem adı hem Base64 verisi burada
+            "assets": [], 
             "docs": ""
         }
         
@@ -62,7 +62,6 @@ class FOSTASCore:
 
     def register_user_asset(self, filename: str, file_data: bytes):
         safe_name = filename.replace(" ", "_")
-        # 3D modeli Base64 formatına çeviriyoruz ki HTML'in içine gömebilelim
         encoded_data = base64.b64encode(file_data).decode('utf-8')
         
         existing = next((a for a in self.project_memory["assets"] if a["name"] == safe_name), None)
@@ -84,12 +83,9 @@ class FOSTASCore:
         return self.generate_game("Yüklenen dökümana göre bir oyun yap.")
 
     def generate_game(self, user_prompt: str) -> bool:
-        """Kullanıcının 3D modelini ve promptunu alır, WebGL (Three.js) oyunu üretir."""
-        
         doc_context = self.project_memory["docs"] if self.project_memory["docs"] else "Yok."
         
-        # Yüklenen 3D modeli alıyoruz
-        model_info = "Kullanıcı 3D model yüklemedi. Standart şekillerle (kutu, küre) oyunu yap."
+        model_info = "Kullanıcı 3D model yüklemedi. Standart şekillerle oyunu yap."
         model_b64 = None
         
         if self.project_memory["assets"]:
@@ -98,7 +94,7 @@ class FOSTASCore:
             model_info = f"Kullanıcı '{model['name']}' adında bir 3D model yükledi. Bu modeli oyunda kullanmak ZORUNDASIN."
         
         system_prompt = f"""
-        You are an expert WebGL Game Developer using Three.js. Create a fully playable game in a SINGLE HTML file.
+        You are an expert WebGL Game Developer using Three.js or HTML5 Canvas. Create a fully playable game in a SINGLE HTML file.
         
         User Request: "{user_prompt}"
         Document Context: "{doc_context}"
@@ -115,11 +111,22 @@ class FOSTASCore:
            loader.load(modelUrl, function(gltf) {{
                let player = gltf.scene;
                scene.add(player);
-               // Player fizikleri ve hareketleri buraya eklenecek
            }});
         4. If no 3D model is provided, use standard Three.js geometries (Box, Sphere).
         5. Game must have: Start screen, Game Loop (requestAnimationFrame), basic physics (gravity, collision), keyboard controls.
         6. Canvas size: 800x600. Center it with a dark background.
+
+        CRITICAL - START BUTTON RULE (PAY EXTREME ATTENTION):
+        - The game MUST have a Start Screen with a button (id="startBtn").
+        - The game loop (requestAnimationFrame) MUST NOT start automatically.
+        - You MUST bind the start button click to initialize the game. 
+        - EXACT JAVASCRIPT PATTERN TO USE:
+          let gameStarted = false;
+          document.getElementById('startBtn').addEventListener('click', function() {{
+              document.getElementById('startScreen').style.display = 'none';
+              initGame(); // This function sets up scene and starts the animate loop
+          }});
+        - If you fail to wire the Start button, the game is broken. Do NOT fail.
         """
 
         # 1. GLM-5.2 ile üret
@@ -137,7 +144,7 @@ class FOSTASCore:
         code = re.sub(r"^```html\n?", "", code.strip())
         code = re.sub(r"\n?```$", "", code.strip())
 
-        # Eğer kullanıcı model yüklediyse, HTML'in içine modelin Base64 verisini gömüyoruz
+        # Modeli HTML'e göm
         if model_b64:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", f"data:application/octet-stream;base64,{model_b64}")
 
