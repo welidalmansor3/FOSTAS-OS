@@ -2,6 +2,7 @@ import os
 import json
 import re
 import base64
+import html as html_module
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -9,7 +10,8 @@ load_dotenv()
 
 class FOSTASCore:
     def __init__(self):
-        self.game_html = ""
+        self.game_html = ""       # Ekranda gösterilecek iframe kodu
+        self.raw_game_html = ""   # İndirme butonu için temiz HTML
         self.project_memory = {
             "assets": [], 
             "docs": ""
@@ -94,7 +96,7 @@ class FOSTASCore:
             model_info = f"Kullanıcı '{model['name']}' adında bir 3D model yükledi. Bu modeli oyunda kullanmak ZORUNDASIN."
         
         system_prompt = f"""
-        You are an expert WebGL Game Developer using Three.js or HTML5 Canvas. Create a fully playable game in a SINGLE HTML file.
+        You are an expert HTML5 Game Developer. Create a fully playable game in a SINGLE HTML file.
         
         User Request: "{user_prompt}"
         Document Context: "{doc_context}"
@@ -102,31 +104,38 @@ class FOSTASCore:
         
         STRICT RULES:
         1. Output ONLY raw HTML code. Start with <!DOCTYPE html>. No markdown.
-        2. If a 3D model is provided, you MUST use Three.js. Include Three.js from CDN:
+        2. If a 3D model is provided, use Three.js. Include EXACTLY these scripts:
            <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
            <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-        3. To load the user's 3D model, write EXACTLY this code in your JavaScript:
+        3. To load the 3D model, write EXACTLY this code:
            const modelUrl = "MODEL_BASE64_PLACEHOLDER";
            const loader = new THREE.GLTFLoader();
            loader.load(modelUrl, function(gltf) {{
                let player = gltf.scene;
                scene.add(player);
            }});
-        4. If no 3D model is provided, use standard Three.js geometries (Box, Sphere).
-        5. Game must have: Start screen, Game Loop (requestAnimationFrame), basic physics (gravity, collision), keyboard controls.
-        6. Canvas size: 800x600. Center it with a dark background.
+        4. If no 3D model is provided, use standard Canvas 2D or Three.js geometries.
+        5. Game must have: Start screen, Game Loop, physics, controls.
 
         CRITICAL - START BUTTON RULE (PAY EXTREME ATTENTION):
-        - The game MUST have a Start Screen with a button (id="startBtn").
+        - The game MUST have a visible Start Screen with a button (id="startBtn").
         - The game loop (requestAnimationFrame) MUST NOT start automatically.
         - You MUST bind the start button click to initialize the game. 
         - EXACT JAVASCRIPT PATTERN TO USE:
           let gameStarted = false;
+          function initGame() {{
+              // Setup
+              gameStarted = true;
+              animate();
+          }}
           document.getElementById('startBtn').addEventListener('click', function() {{
               document.getElementById('startScreen').style.display = 'none';
-              initGame(); // This function sets up scene and starts the animate loop
+              if (!gameStarted) initGame();
           }});
-        - If you fail to wire the Start button, the game is broken. Do NOT fail.
+          function animate() {{
+              if (!gameStarted) return;
+              requestAnimationFrame(animate);
+          }}
         """
 
         # 1. GLM-5.2 ile üret
@@ -149,7 +158,11 @@ class FOSTASCore:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", f"data:application/octet-stream;base64,{model_b64}")
 
         if "<!DOCTYPE html>" in code or "<html>" in code:
-            self.game_html = code
+            self.raw_game_html = code # İndirme butonu için temiz HTML
+            
+            # Senin harika iframe srcdoc önerin:
+            escaped_html = html_module.escape(code)
+            self.game_html = f'<iframe srcdoc="{escaped_html}" style="width:100%;height:600px;border:none;overflow:hidden;"></iframe>'
             return True
         
         self.game_html = "<h1 style='color:red;text-align:center;'>Oyun üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
