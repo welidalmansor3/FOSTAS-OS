@@ -19,7 +19,7 @@ class FOSTASCore:
             "deepseek": os.getenv("NV_DEEPSEEK_KEY"),
             "llama": os.getenv("NV_LLAMA_KEY"),
             "gpt_oss": os.getenv("NV_GPT_OSS_KEY"),
-            "nemotron": os.getenv("NV_NEMOTRON_KEY") # Yeni Model Eklendi
+            "nemotron": os.getenv("NV_NEMOTRON_KEY")
         }
 
         self.nv_base_url = "https://integrate.api.nvidia.com/v1"
@@ -103,14 +103,13 @@ class FOSTASCore:
             "Define the game mechanics, win/lose conditions, controls, and physics in 3 detailed bullet points."
         )
         
-        # Nemotron için reasoning_budget ayarı ile çağırıyoruz
         game_plan = self._nvidia_chat(
             "nemotron", 
             "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", 
             nemotron_prompt, 
             max_tokens=8000, 
             temperature=0.6, 
-            extra_body={"reasoning_budget": 4096} # Düşünme payı veriyoruz
+            extra_body={"reasoning_budget": 4096}
         )
 
         # =====================================================================
