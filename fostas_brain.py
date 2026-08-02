@@ -39,7 +39,7 @@ class FOSTASCore:
 
     def _nvidia_chat(self, model_client: str, model_name: str, prompt: str, max_tokens: int = 4096, temperature: float = 0.7, extra_body: dict = None) -> str:
         if model_client not in self.clients:
-            return f"Hata: {model_client} client bağlı değil."
+            return "Hata: Client bağlı değil."
         
         client = self.clients[model_client]
         try:
@@ -56,10 +56,10 @@ class FOSTASCore:
             completion = client.chat.completions.create(**kwargs)
             return completion.choices[0].message.content
         except Exception as e:
-            return f"API Hatası ({model_name}): {str(e)}"
+            return "API Hatası: " + str(e)
 
     def upload_document(self, text: str):
-        self.project_memory["docs"] += f"\n\n--- USER UPLOAD ---\n{text[:3000]}"
+        self.project_memory["docs"] += "\n\n--- USER UPLOAD ---\n" + text[:3000]
 
     def register_user_asset(self, filename: str, file_data: bytes):
         safe_name = filename.replace(" ", "_")
@@ -72,11 +72,11 @@ class FOSTASCore:
         else:
             self.project_memory["assets"].append({
                 "name": safe_name, 
-                "path": f"res://assets/{safe_name}", 
+                "path": "res://assets/" + safe_name, 
                 "data": file_data,
                 "b64": encoded_data
             })
-        return f"res://assets/{safe_name}"
+        return "res://assets/" + safe_name
 
     def generate_game_from_doc(self):
         if not self.project_memory["docs"].strip():
@@ -92,65 +92,63 @@ class FOSTASCore:
         if self.project_memory["assets"]:
             model = self.project_memory["assets"][0]
             model_b64 = model["b64"]
-            model_info = f"Kullanıcı '{model['name']}' adında bir 3D model yükledi. Bu modeli oyunda kullanmak ZORUNDASIN."
+            model_info = "Kullanıcı '" + model["name"] + "' adında bir 3D model yükledi. Bu modeli oyunda kullanmak ZORUNDASIN."
         
         # =====================================================================
         # AŞAMA 1: LLAMA 3.3 İLE OYUN MEKANİKLERİNİ PLANLAMA (MİMAR)
         # =====================================================================
-        llama_prompt = f"""
-        You are the Game Architect. User wants a game: "{user_prompt}".
-        Context: "{doc_context}"
-        Model Info: "{model_info}"
-        Define the game mechanics, win/lose conditions, controls, and physics in 3 short bullet points.
-        """
+        llama_prompt = (
+            "You are the Game Architect. User wants a game: \"" + user_prompt + "\".\n"
+            "Context: \"" + doc_context + "\"\n"
+            "Model Info: \"" + model_info + "\"\n"
+            "Define the game mechanics, win/lose conditions, controls, and physics in 3 short bullet points."
+        )
         game_plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", llama_prompt, max_tokens=1000, temperature=0.5)
 
         # =====================================================================
         # AŞAMA 2: DEEPSEEK V4 İLE TEKNİK ŞARTNAME HAZIRLAMA (MÜHENDİS)
         # =====================================================================
-        deepseek_prompt = f"""
-        You are the Technical Engineer. Based on this game plan: "{game_plan}", write a detailed technical specification for an HTML5 game.
-        List the required JavaScript variables, functions (initGame, animate), and CSS elements (startBtn, startScreen).
-        Do NOT write the full HTML yet. Just the technical blueprint.
-        """
+        deepseek_prompt = (
+            "You are the Technical Engineer. Based on this game plan: \"" + game_plan + "\", write a detailed technical specification for an HTML5 game.\n"
+            "List the required JavaScript variables, functions (initGame, animate), and CSS elements (startBtn, startScreen).\n"
+            "Do NOT write the full HTML yet. Just the technical blueprint."
+        )
         tech_spec = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", deepseek_prompt, max_tokens=2000, extra_body={"chat_template_kwargs":{"thinking":False}})
 
         # =====================================================================
         # AŞAMA 3: GLM-5.2 İLE KODU YAZMA (KODLAYICI)
         # =====================================================================
-        glm_prompt = f"""
-        You are the HTML5 Coder. Write a fully playable game in a SINGLE HTML file using HTML5 Canvas or Three.js.
-        
-        Game Request: "{user_prompt}"
-        Model Info: "{model_info}"
-        Game Plan: "{game_plan}"
-        Technical Spec: "{tech_spec}"
-        
-        STRICT RULES:
-        1. Output ONLY raw HTML code. Start with <!DOCTYPE html>. No markdown.
-        2. If a 3D model is provided, use Three.js. Include EXACTLY these scripts:
-           <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-           <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-        3. To load the 3D model, write EXACTLY this code:
-           const modelUrl = "MODEL_BASE64_PLACEHOLDER";
-           const loader = new THREE.GLTFLoader();
-           loader.load(modelUrl, function(gltf) {{ scene.add(gltf.scene); }});
-        4. Game MUST have: Start screen (id="startScreen"), Start button (id="startBtn"), Game Loop.
-        5. Use this EXACT JavaScript pattern for the start button:
-           let gameStarted = false;
-           function initGame() {{ gameStarted = true; animate(); }}
-           document.addEventListener('DOMContentLoaded', function() {{
-               document.getElementById('startBtn').addEventListener('click', function() {{
-                   document.getElementById('startScreen').style.display = 'none';
-                   if (!gameStarted) initGame();
-               }});
-           }});
-           function animate() {{ if (!gameStarted) return; requestAnimationFrame(animate); }}
-        """
+        glm_prompt = (
+            "You are the HTML5 Coder. Write a fully playable game in a SINGLE HTML file using HTML5 Canvas or Three.js.\n\n"
+            "Game Request: \"" + user_prompt + "\"\n"
+            "Model Info: \"" + model_info + "\"\n"
+            "Game Plan: \"" + game_plan + "\"\n"
+            "Technical Spec: \"" + tech_spec + "\"\n\n"
+            "STRICT RULES:\n"
+            "1. Output ONLY raw HTML code. Start with <!DOCTYPE html>. No markdown.\n"
+            "2. If a 3D model is provided, use Three.js. Include EXACTLY these scripts:\n"
+            "   <script src=\"https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js\"></script>\n"
+            "   <script src=\"https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js\"></script>\n"
+            "3. To load the 3D model, write EXACTLY this code:\n"
+            "   const modelUrl = \"MODEL_BASE64_PLACEHOLDER\";\n"
+            "   const loader = new THREE.GLTFLoader();\n"
+            "   loader.load(modelUrl, function(gltf) { scene.add(gltf.scene); });\n"
+            "4. Game MUST have: Start screen (id=\"startScreen\"), Start button (id=\"startBtn\"), Game Loop.\n"
+            "5. Use this EXACT JavaScript pattern for the start button:\n"
+            "   let gameStarted = false;\n"
+            "   function initGame() { gameStarted = true; animate(); }\n"
+            "   document.addEventListener('DOMContentLoaded', function() {\n"
+            "       document.getElementById('startBtn').addEventListener('click', function() {\n"
+            "           document.getElementById('startScreen').style.display = 'none';\n"
+            "           if (!gameStarted) initGame();\n"
+            "       });\n"
+            "   });\n"
+            "   function animate() { if (!gameStarted) return; requestAnimationFrame(animate); }"
+        )
         
         code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
         
-        # Eğer GLM başarısız olursa (çekilirsek), DeepSeek'in yazmasını istiyoruz
+        # Fallback: GLM başarısız olursa DeepSeek yazsın
         if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
             code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", glm_prompt, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
 
@@ -158,10 +156,95 @@ class FOSTASCore:
         # AŞAMA 4: GPT-OSS İLE KODU KONTROL ETME VE DÜZELTME (KALİTE KONTROL)
         # =====================================================================
         if "<!DOCTYPE html>" in code or "<html>" in code:
-            gpt_oss_prompt = f"""
-            You are the QA Engineer. Review the following HTML5 game code.
-            Ensure it strictly has:
-            1. A start button with id="startBtn".
-            2. A start screen with id="startScreen".
-            3. The game loop is NOT auto-starting (no direct call to animate() on load).
-            4. The startBtn correctly hides the startScreen and calls initGame().
+            gpt_oss_prompt = (
+                "You are the QA Engineer. Review the following HTML5 game code.\n"
+                "Ensure it strictly has:\n"
+                "1. A start button with id=\"startBtn\".\n"
+                "2. A start screen with id=\"startScreen\".\n"
+                "3. The game loop is NOT auto-starting.\n"
+                "4. The startBtn correctly hides the startScreen and calls initGame().\n\n"
+                "Fix any bugs, missing tags, or broken event listeners.\n"
+                "Output ONLY the corrected, raw HTML code. No markdown fences, no explanations.\n\n"
+                "CODE TO REVIEW AND FIX:\n"
+                + code
+            )
+            
+            reviewed_code = self._nvidia_chat("gpt_oss", "openai/gpt-oss-120b", gpt_oss_prompt, max_tokens=8000)
+            
+            # Eğer GPT-OSS başarılı bir düzeltme yaptıysa, onun kodunu kullanıyoruz
+            if "<!DOCTYPE html>" in reviewed_code or "<html>" in reviewed_code:
+                code = reviewed_code
+
+        # Markdown temizliği
+        code = re.sub(r"^```html\n?", "", code.strip())
+        code = re.sub(r"\n?```$", "", code.strip())
+
+        # Modeli HTML'e göm
+        if model_b64:
+            code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
+
+        if "<!DOCTYPE html>" in code or "<html>" in code:
+            # Enforcer Script (Buton her halükarda çalışsın diye)
+            enforcer_script = """
+<script>
+let _gameInitialized = false;
+let _gameStarted = false;
+
+document.addEventListener('DOMContentLoaded', setupGameButton);
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupGameButton);
+} else {
+    setupGameButton();
+}
+
+function setupGameButton() {
+    if (_gameInitialized) return;
+    _gameInitialized = true;
+
+    let btn = document.getElementById('startBtn') || document.querySelector('button');
+    let startScreen = document.getElementById('startScreen');
+    
+    if (btn) {
+        let newBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(newBtn, btn);
+        btn = newBtn;
+
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (startScreen) startScreen.style.display = 'none';
+
+            if (typeof initGame === 'function') { initGame(); _gameStarted = true; }
+            else if (typeof startGame === 'function') { startGame(); _gameStarted = true; }
+            else if (typeof start === 'function') { start(); _gameStarted = true; }
+            else if (typeof beginGame === 'function') { beginGame(); _gameStarted = true; }
+
+            if (typeof animate === 'function' && !window.gameStarted && !_gameStarted) {
+                window.gameStarted = true;
+                _gameStarted = true;
+                animate();
+            }
+        });
+        btn.style.cursor = 'pointer';
+    }
+}
+</script>
+"""
+            
+            if "</body>" in code:
+                code = code.replace("</body>", enforcer_script + "\n</body>")
+            else:
+                code += enforcer_script
+
+            self.raw_game_html = code
+            
+            # Base64 Data URI ile iframe gösterimi
+            encoded_html = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+            self.game_html = '<iframe src="data:text/html;base64,' + encoded_html + '" style="width:100%;height:650px;border:none;overflow:hidden;"></iframe>'
+            
+            return True
+        
+        self.game_html = "<h1 style='color:red;text-align:center;'>Oyun üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
+        return False
