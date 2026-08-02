@@ -1,7 +1,5 @@
 streamlit
-python-dotenv
-google-generativeai
 openai
-requests
+python-dotenv
 pypdf
 python-docx
