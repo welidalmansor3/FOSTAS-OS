@@ -2,7 +2,6 @@ import os
 import json
 import re
 import base64
-import html as html_module
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -128,9 +127,11 @@ class FOSTASCore:
               gameStarted = true;
               animate();
           }}
-          document.getElementById('startBtn').addEventListener('click', function() {{
-              document.getElementById('startScreen').style.display = 'none';
-              if (!gameStarted) initGame();
+          document.addEventListener('DOMContentLoaded', function() {{
+              document.getElementById('startBtn').addEventListener('click', function() {{
+                  document.getElementById('startScreen').style.display = 'none';
+                  if (!gameStarted) initGame();
+              }});
           }});
           function animate() {{
               if (!gameStarted) return;
@@ -158,44 +159,88 @@ class FOSTASCore:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", f"data:application/octet-stream;base64,{model_b64}")
 
         if "<!DOCTYPE html>" in code or "<html>" in code:
-            # YAPAY ZEKA BOZUK BAĞLAMASIN DİYE BİZ KENDİMİZ BUTONU BAĞLAYAN KODU ENJEKTE EDİYORUZ
+            # ÇÖZÜM 1: DOMContentLoaded kullanarak proper event binding
+            # ÇÖZÜM 2: Backup event listener ekleyerek multiple trigger
+            # ÇÖZÜM 3: Game loop control mekanizması
             enforcer_script = """
             <script>
-            window.onload = function() {
+            let _gameInitialized = false;
+            let _gameStarted = false;
+
+            // ÇÖZÜM 1: DOMContentLoaded ile güvenli binding
+            document.addEventListener('DOMContentLoaded', setupGameButton);
+
+            // ÇÖZÜM 2: Fallback - window.onload da çalışsın
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', setupGameButton);
+            } else {
+                setupGameButton();
+            }
+
+            function setupGameButton() {
+                if (_gameInitialized) return; // İki kez çalışmasını önle
+                _gameInitialized = true;
+
                 let btn = document.getElementById('startBtn') || document.querySelector('button');
-                if(btn) {
-                    btn.addEventListener('click', function() {
-                        let startScreen = document.getElementById('startScreen');
-                        if(startScreen) startScreen.style.display = 'none';
+                let startScreen = document.getElementById('startScreen');
+                
+                if (btn) {
+                    // Eski event listener'ları temizle
+                    let newBtn = btn.cloneNode(true);
+                    btn.parentNode.replaceChild(newBtn, btn);
+                    btn = newBtn;
+
+                    btn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
                         
+                        if (startScreen) {
+                            startScreen.style.display = 'none';
+                        }
+
                         // AI'ın yazdığı olası tüm başlatma fonksiyonlarını deniyoruz
-                        if(typeof initGame === 'function') initGame();
-                        else if(typeof startGame === 'function') startGame();
-                        else if(typeof start === 'function') start();
-                        
+                        if (typeof initGame === 'function') {
+                            initGame();
+                            _gameStarted = true;
+                        } else if (typeof startGame === 'function') {
+                            startGame();
+                            _gameStarted = true;
+                        } else if (typeof start === 'function') {
+                            start();
+                            _gameStarted = true;
+                        } else if (typeof beginGame === 'function') {
+                            beginGame();
+                            _gameStarted = true;
+                        }
+
                         // Eğer AI animate() fonksiyonunu yazmışsa başlatıyoruz
-                        if(typeof animate === 'function' && !window.gameStarted) {
+                        if (typeof animate === 'function' && !window.gameStarted && !_gameStarted) {
                             window.gameStarted = true;
+                            _gameStarted = true;
                             animate();
                         }
                     });
+
+                    // Ek: button hover ve focus state'lerini ekle
+                    btn.style.cursor = 'pointer';
                 }
-            };
+            }
             </script>
-            </body>
             """
             
             # Eğer AI </body> etiketini kullandıysa hemen öncesine, kullanmadıysa en sona ekle
             if "</body>" in code:
-                code = code.replace("</body>", enforcer_script)
+                code = code.replace("</body>", enforcer_script + "\n</body>")
             else:
                 code += enforcer_script
 
             self.raw_game_html = code # İndirme butonu için temiz HTML
             
-            # iframe srcdoc ile gösterim
-            escaped_html = html_module.escape(code)
-            self.game_html = f'<iframe srcdoc="{escaped_html}" style="width:100%;height:600px;border:none;overflow:hidden;"></iframe>'
+            # ÇÖZÜM: iframe srcdoc yerine data URI kullan (HTML5 sandbox uyumlu)
+            # HTML'i base64 encode et
+            encoded_html = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+            self.game_html = f'<iframe src="data:text/html;base64,{encoded_html}" style="width:100%;height:650px;border:none;overflow:hidden;"></iframe>'
+            
             return True
         
         self.game_html = "<h1 style='color:red;text-align:center;'>Oyun üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
