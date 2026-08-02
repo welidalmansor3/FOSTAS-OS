@@ -8,7 +8,7 @@ load_dotenv()
 
 class FOSTASCore:
     def __init__(self):
-        self.raw_game_html = "" # Sadece temiz HTML tutulacak, iframe enjeksiyonu yok.
+        self.raw_game_html = ""
         self.project_memory = {
             "assets": [], 
             "docs": ""
@@ -18,7 +18,8 @@ class FOSTASCore:
             "glm": os.getenv("NV_GLM_KEY"),
             "deepseek": os.getenv("NV_DEEPSEEK_KEY"),
             "llama": os.getenv("NV_LLAMA_KEY"),
-            "gpt_oss": os.getenv("NV_GPT_OSS_KEY")
+            "gpt_oss": os.getenv("NV_GPT_OSS_KEY"),
+            "nemotron": os.getenv("NV_NEMOTRON_KEY") # Yeni Model Eklendi
         }
 
         self.nv_base_url = "https://integrate.api.nvidia.com/v1"
@@ -93,15 +94,24 @@ class FOSTASCore:
             model_info = "Kullanıcı '" + model["name"] + "' adında bir 3D model yükledi. Bu modeli oyunda kullanmak ZORUNDASIN."
         
         # =====================================================================
-        # AŞAMA 1: LLAMA 3.3 İLE OYUN MEKANİKLERİNİ PLANLAMA (MİMAR)
+        # AŞAMA 1: NEMOTRON İLE OYUN MEKANİKLERİNİ PLANLAMA (BAŞ MİMAR)
         # =====================================================================
-        llama_prompt = (
+        nemotron_prompt = (
             "You are the Game Architect. User wants a game: \"" + user_prompt + "\".\n"
             "Context: \"" + doc_context + "\"\n"
             "Model Info: \"" + model_info + "\"\n"
-            "Define the game mechanics, win/lose conditions, controls, and physics in 3 short bullet points."
+            "Define the game mechanics, win/lose conditions, controls, and physics in 3 detailed bullet points."
         )
-        game_plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", llama_prompt, max_tokens=1000, temperature=0.5)
+        
+        # Nemotron için reasoning_budget ayarı ile çağırıyoruz
+        game_plan = self._nvidia_chat(
+            "nemotron", 
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", 
+            nemotron_prompt, 
+            max_tokens=8000, 
+            temperature=0.6, 
+            extra_body={"reasoning_budget": 4096} # Düşünme payı veriyoruz
+        )
 
         # =====================================================================
         # AŞAMA 2: DEEPSEEK V4 İLE TEKNİK ŞARTNAME HAZIRLAMA (MÜHENDİS)
@@ -180,8 +190,7 @@ class FOSTASCore:
         if model_b64:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
 
-        # ARTIK HİÇBİR JAVASCRIPT ENJEKSİYONU YAPILMIYOR!
-        # AI'ın yazdığı kod direkt kabul ediliyor.
+        # HTML'i kaydet
         if "<!DOCTYPE html>" in code or "<html>" in code:
             self.raw_game_html = code
             return True
