@@ -27,6 +27,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Session state başlatma
 if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
 if 'messages' not in st.session_state:
@@ -105,7 +106,7 @@ tab1, tab2 = st.tabs(["🛠️ Oyun Üret", "🕹️ Oyunu Dene ve İndir"])
 with tab1:
     st.header("💬 Oyun Fikrini Yaz veya Yükle")
     
-    # ŞABLLOLAR (PATLATICI ÖZELLİK)
+    # ŞABLLOLAR
     st.subheader("🚀 Hızlı Başlangıç Şablonları")
     templates = [
         "Serbest (Kendi Promptunu Yaz)",
@@ -117,11 +118,6 @@ with tab1:
     ]
     selected_template = st.selectbox("Bir şablon seç veya kendi promptunu yaz:", templates)
     
-    if selected_template != "Serbest (Kendi Promptunu Yaz)":
-        prefilled_prompt = selected_template
-    else:
-        prefilled_prompt = ""
-
     with st.expander("📎 Doküman Yükle (GDD / Fikir)"):
         uploaded_file = st.file_uploader("PDF, DOCX, TXT, MD", type=["pdf", "docx", "txt", "md"], label_visibility="collapsed")
         if uploaded_file is not None:
@@ -145,9 +141,15 @@ with tab1:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Chat input kısmına şablonu yerleştirme
-    prompt = st.chat_input("Ne oyunu yapalım?", value=prefilled_prompt if prefilled_prompt else None)
-    
+    # Şablon seçildiyse buton göster, yoksa normal chat input
+    if selected_template != "Serbest (Kendi Promptunu Yaz)":
+        if st.button(f"🚀 '{selected_template}' Şablonunu AI'a Gönder", use_container_width=True):
+            prompt = selected_template
+        else:
+            prompt = None
+    else:
+        prompt = st.chat_input("Ne oyunu yapalım? (Örn: Yüklediğim modelle bir korku oyunu yap)")
+
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -171,7 +173,7 @@ with tab2:
         # iframe srcdoc ile gösterim (buton sorunu kesin çözüm)
         components.html(fostas.game_html, height=650, scrolling=False)
         
-        # PATLATICI ÖZELLİK 2: OYUNU İNDİRME BUTONU
+        # OYUNU İNDİRME BUTONU
         st.markdown("---")
         if fostas.raw_game_html:
             st.download_button(
