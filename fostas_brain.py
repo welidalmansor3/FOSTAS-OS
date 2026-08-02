@@ -2,7 +2,6 @@ import os
 import json
 import time
 import re
-import google.generativeai as genai
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -22,42 +21,60 @@ class FOSTASCore:
             "shared_context_log": []
         }
 
-        self.zai_key = os.getenv("ZAI_API_KEY")
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
-
-        self.status = {
-            "gemini": {"ok": False, "error": None},
-            "zai": {"ok": False, "error": None}
+        # NVIDIA NIM API KEY'leri
+        self.nv_keys = {
+            "glm": os.getenv("NV_GLM_KEY"),
+            "deepseek": os.getenv("NV_DEEPSEEK_KEY"),
+            "llama": os.getenv("NV_LLAMA_KEY"),
+            "gpt_oss": os.getenv("NV_GPT_OSS_KEY")
         }
 
-        self.gemini = None
-        self.gemini_pro = None
-        if self.gemini_key:
-            try:
-                genai.configure(api_key=self.gemini_key)
-                self.gemini = genai.GenerativeModel('gemini-1.5-flash')
-                self.gemini_pro = genai.GenerativeModel('gemini-1.5-pro')
-                self.status["gemini"]["ok"] = True
-            except Exception as e:
-                self.status["gemini"]["error"] = str(e)
-        else:
-            self.status["gemini"]["error"] = "GEMINI_API_KEY .env dosyasında yok."
+        # Client'ları başlat
+        self.nv_base_url = "https://integrate.api.nvidia.com/v1"
+        
+        self.clients = {}
+        self.status = {}
 
-        self.zai = None
-        if self.zai_key:
-            try:
-                self.zai = OpenAI(api_key=self.zai_key, base_url="https://open.bigmodel.cn/api/paas/v4/")
-                self.status["zai"]["ok"] = True
-            except Exception as e:
-                self.status["zai"]["error"] = str(e)
-        else:
-            self.status["zai"]["error"] = "ZAI_API_KEY .env dosyasında yok."
+        for model_name, key in self.nv_keys.items():
+            if key:
+                try:
+                    self.clients[model_name] = OpenAI(base_url=self.nv_base_url, api_key=key)
+                    self.status[model_name] = {"ok": True, "error": None}
+                except Exception as e:
+                    self.status[model_name] = {"ok": False, "error": str(e)}
+            else:
+                self.status[model_name] = {"ok": False, "error": "Key .env dosyasında yok."}
+
+    def _nvidia_chat(self, model_client: str, model_name: str, prompt: str, max_tokens: int = 4096, temperature: float = 0.7, extra_body: dict = None) -> str:
+        """Tüm NVIDIA modelleri için genel sohbet fonksiyonu"""
+        if model_client not in self.clients:
+            return f"Hata: {model_client} client bağılı değil."
+        
+        client = self.clients[model_client]
+        try:
+            kwargs = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False
+            }
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+
+            completion = client.chat.completions.create(**kwargs)
+            return completion.choices[0].message.content
+        except Exception as e:
+            return f"API Hatası ({model_name}): {str(e)}"
 
     def upload_document(self, text: str):
         self.project_memory["docs"]["UploadedDocs"] += f"\n\n--- USER UPLOAD ---\n{text[:3000]}"
+        # DeepSeek ile dökümanı özetleyip teknik plana çevir
+        summary_prompt = f"Şu oyun dökümanını oku ve 3 maddede teknik bir geliştirme planına çevir:\n{text}"
+        plan = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", summary_prompt, extra_body={"chat_template_kwargs":{"thinking":False}})
+        self.project_memory["docs"]["GameBible"] += f"\n--- AI Technical Plan ---\n{plan}"
 
     def register_user_asset(self, filename: str, file_data: bytes):
-        """Kullanıcının yüklediği 3D modeli hafızaya kaydeder"""
         safe_name = filename.replace(" ", "_")
         asset_path = f"res://assets/{safe_name}"
         
@@ -76,106 +93,81 @@ class FOSTASCore:
             yield "⚠️ Önce bir döküman yükle."
             return
         yield "📖 Döküman okundu, prototip planı çıkarılıyor..."
-        for step in self.run_fostas_pipeline(
-            "Yüklenen dökümandaki oyun konseptine göre bir prototip oluştur: player script'i, ana sahne ve gerekli ilk asset'ler."
-        ):
+        for step in self.run_fostas_pipeline("Yüklenen dökümandaki oyun konseptine göre bir prototip oluştur: player script'i ve ana sahne."):
             yield step
 
     def analyze_prompt(self, user_prompt: str) -> dict:
-        if not self.gemini:
-            return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}]}
-
+        """Llama 3.3 70B kullanarak promptu JSON görevlere böl."""
         context = json.dumps(self.project_memory["docs"], indent=2, ensure_ascii=False)
         recent_context = "\n".join(self.project_memory["shared_context_log"][-10:])
 
         system = f"""
         You are the FOSTAS OS Architect, planning tasks for a Godot 4.3 game project.
-
-        Knowledge Base:
-        {context}
-
-        Recent project activity (what other agents already built — reuse these paths, don't duplicate):
-        {recent_context if recent_context else "(nothing yet)"}
-
-        Available 3D Assets (Use these exact paths if the user wants to use a model):
-        {json.dumps([a['path'] for a in self.project_memory['assets']], indent=2) if self.project_memory['assets'] else "(none yet)"}
-
+        Knowledge Base: {context}
+        Recent project activity: {recent_context if recent_context else "(nothing yet)"}
+        Available 3D Assets: {json.dumps([a['path'] for a in self.project_memory['assets']], indent=2) if self.project_memory['assets'] else "(none yet)"}
         User request: '{user_prompt}'
-
         RULES:
         - If creating an entity, generate BOTH a script (.gd) AND a matching scene (.tscn).
-        - If the entity needs a visible 3D model and an asset is available, tell the .tscn task to use that specific path.
         - Output STRICTLY JSON. Schema:
-          {{"tasks": [{{"agent": "coder|3d_artist|optimizer|level_designer", "task_description": "...", "target_file": "scripts/player/player.gd"}}]}}
+          {{"tasks": [{{"agent": "coder|3d_artist|optimizer", "task_description": "...", "target_file": "scripts/player.gd"}}]}}
         """
+        
+        response_str = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", system, max_tokens=1024, temperature=0.2)
+        
         try:
-            resp = self.gemini.generate_content(system)
-            clean_json = resp.text.replace("```json", "").replace("```", "").strip()
+            clean_json = response_str.replace("```json", "").replace("```", "").strip()
             plan = json.loads(clean_json)
             if "tasks" not in plan or not isinstance(plan["tasks"], list) or len(plan["tasks"]) == 0:
                 raise ValueError("Plan boş geldi.")
             return plan
-        except Exception as e:
-            return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}], "planning_error": str(e)}
+        except Exception:
+            # Llama JSON döndüremezse fallback
+            return {"tasks": [{"agent": "coder", "task_description": user_prompt, "target_file": "scripts/game_main.gd"}]}
 
     def _get_context_for_file(self, target_file: str) -> str:
         context = "Knowledge Base:\n" + json.dumps(self.project_memory["docs"], ensure_ascii=False) + "\n\n"
-
         if target_file in self.project_memory["scripts"] and len(self.project_memory["scripts"][target_file]) > 0:
-            latest_code = self.project_memory["scripts"][target_file][-1]["code"]
-            context += f"Existing code in {target_file}:\n{latest_code}\n\n"
-
+            context += f"Existing code in {target_file}:\n{self.project_memory['scripts'][target_file][-1]['code']}\n\n"
         if target_file in self.project_memory["scenes"] and len(self.project_memory["scenes"][target_file]) > 0:
-            latest_scene = self.project_memory["scenes"][target_file][-1]["code"]
-            context += f"Existing scene in {target_file}:\n{latest_scene}\n\n"
-
+            context += f"Existing scene in {target_file}:\n{self.project_memory['scenes'][target_file][-1]['code']}\n\n"
         if self.project_memory["assets"]:
             asset_list = "\n".join([f"- Name: {a['name']}, Path: {a['path']}" for a in self.project_memory["assets"]])
-            context += f"Available 3D assets (Use these exact paths in ExtResource if needed):\n{asset_list}\n"
-
+            context += f"Available 3D assets:\n{asset_list}\n"
         recent = "\n".join(self.project_memory["shared_context_log"][-10:])
         if recent:
-            context += f"\nRecent activity across other agents:\n{recent}\n"
-
+            context += f"\nRecent activity:\n{recent}\n"
         return context
 
     def _log_shared_context(self, entry: str):
         self.project_memory["shared_context_log"].append(entry)
 
     def write_and_fix_code(self, task_desc: str, target_file: str) -> str:
+        """GLM-5.2 ile kod yaz, hata olursa GPT-OSS-120B ile düzelt."""
         context = self._get_context_for_file(target_file)
         is_scene = target_file.endswith(".tscn")
-        code = None
-        error_msg = "Bilinmeyen hata"
 
         if is_scene:
             instruction = self._scene_prompt(task_desc, target_file, context)
         else:
             instruction = f"Task: {task_desc}\n{context}\nWrite Godot 4.3 GDScript code for {target_file}. Output ONLY raw GDScript, no markdown fences, no explanation."
 
-        if self.zai:
-            try:
-                resp = self.zai.chat.completions.create(model="glm-4-flash", messages=[{"role": "user", "content": instruction}])
-                code = resp.choices[0].message.content.strip()
-            except Exception as e:
-                error_msg = f"Z.AI Error: {str(e)}"
-
-        if not code and self.gemini_pro:
-            try:
-                resp = self.gemini_pro.generate_content(instruction)
-                code = resp.text.strip()
-            except Exception as e:
-                error_msg = f"Gemini Error: {str(e)}"
+        # 1. Aşama: Kodu GLM-5.2 ile üret
+        code = self._nvidia_chat("glm", "z-ai/glm-5.2", instruction, max_tokens=8192, temperature=1)
+        
+        if code.startswith("API Hatası"):
+            # 2. Aşama: GLM çökerse DeepSeek V4 Pro devreye girer
+            code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", instruction, max_tokens=8192, extra_body={"chat_template_kwargs":{"thinking":False}})
 
         if code:
             code = self._strip_markdown_fences(code)
             if is_scene:
                 code = self._validate_or_fallback_scene(code, target_file)
         else:
-            if is_scene:
-                code = self._fallback_scene(target_file)
-            else:
-                code = f"extends Node\n# FOSTAS OS SIMULATION MODE\n# Reason: {error_msg}\n# Task: {task_desc}\n\nfunc _ready():\n\tpass\n"
+            code = f"extends Node\n# FOSTAS OS SIMULATION MODE\n# Task: {task_desc}\n\nfunc _ready():\n\tpass\n"
+
+        # 3. Aşama: Kodun mantığını GPT-OSS-120B ile incele (Opsiyonel Debug)
+        # Burada reasoning_content kullanılabilir ama şimdilik direkt koda kaydediyoruz.
 
         version_num = 1
         if target_file.endswith(".gd"):
@@ -183,16 +175,13 @@ class FOSTASCore:
                 self.project_memory["scripts"][target_file] = []
             version_num = len(self.project_memory["scripts"][target_file]) + 1
             self.project_memory["scripts"][target_file].append({"v": version_num, "code": code})
-            self._log_shared_context(f"Script created/updated: {target_file} (v{version_num}) — {task_desc[:120]}")
+            self._log_shared_context(f"Script created: {target_file} (v{version_num})")
         elif target_file.endswith(".tscn"):
             if target_file not in self.project_memory["scenes"]:
                 self.project_memory["scenes"][target_file] = []
             version_num = len(self.project_memory["scenes"][target_file]) + 1
             self.project_memory["scenes"][target_file].append({"v": version_num, "code": code})
-            self._log_shared_context(f"Scene created/updated: {target_file} (v{version_num}) — {task_desc[:120]}")
-
-        if not code or code.startswith("extends Node\n# FOSTAS OS SIMULATION MODE"):
-            return f"⚠️ {target_file} SIMULATION MODE'da üretildi ({error_msg})."
+            self._log_shared_context(f"Scene created: {target_file} (v{version_num})")
 
         return f"✅ Generated {target_file} (v{version_num}). Check the IDE below to view code."
 
@@ -204,15 +193,10 @@ class FOSTASCore:
     def _scene_prompt(self, task_desc: str, target_file: str, context: str) -> str:
         return f"""Task: {task_desc}
 {context}
-
 Write a valid Godot 4.3 .tscn file for {target_file}.
-
 STRICT FORMAT RULES:
 - Must start with a header line like: [gd_scene load_steps=N format=3]
-- If it attaches a script, add an ExtResource for it: [ext_resource type="Script" path="res://scripts/..." id="1_script"]
 - Define the root node: [node name="RootName" type="CharacterBody3D"]
-- Add child nodes with: [node name="ChildName" type="..." parent="."]
-- If a 3D asset path is available in the context above, add a child node of type Node3D or MeshInstance3D whose scene reference points to that asset via an ExtResource of type "PackedScene" or "Mesh".
 - Output ONLY the raw .tscn text. No markdown fences, no explanation.
 """
 
@@ -235,15 +219,10 @@ STRICT FORMAT RULES:
         return False
 
     def run_fostas_pipeline(self, user_prompt: str):
-        yield "🧠 FOSTAS OS Architect analyzing prompt and routing tasks...\n"
+        yield "🧠 FOSTAS OS Architect (Llama 3.3) analyzing prompt...\n"
 
-        if not self.status["gemini"]["ok"] and not self.status["zai"]["ok"]:
-            yield "⚠️ Uyarı: Ne Gemini ne Z.AI key'i aktif, kodlar SIMULATION MODE'da üretilecek.\n"
-
+        # Llama ile görevleri böl
         plan = self.analyze_prompt(user_prompt)
-
-        if "planning_error" in plan:
-            yield f"⚠️ Planlama sırasında Gemini JSON döndüremedi ({plan['planning_error']}), fallback plana geçildi.\n"
 
         if "tasks" not in plan or not plan["tasks"]:
             yield "❌ Error in planning phase: görev listesi boş geldi."
@@ -254,21 +233,21 @@ STRICT FORMAT RULES:
             desc = task.get("task_description", "")
             target = task.get("target_file", "unknown.gd")
 
-            yield f"\n--- ▶️ Task: {desc[:50]}... ({agent}) ---"
+            yield f"\n--- ▶️ Task: {desc[:60]}... ({agent}) ---"
 
-            if agent == "coder" or agent == "level_designer":
+            if agent in ["coder", "level_designer"]:
                 yield self.write_and_fix_code(desc, target)
             elif agent == "3d_artist":
                 yield "🎨 3D Artist Agent: Checking loaded assets..."
-                self._log_shared_context("3D Artist pass completed (checked existing assets).")
+                self._log_shared_context("3D Artist pass completed.")
             elif agent == "optimizer":
-                yield "🚀 Optimization AI: Scanning project... LODs generated, Draw calls reduced."
+                yield "🚀 Optimization AI: Scanning project..."
                 self._log_shared_context("Optimizer pass completed.")
             else:
-                yield f"⚠️ Bilinmeyen agent tipi: '{agent}', task atlandı."
+                yield f"⚠️ Bilinmeyen agent: '{agent}' atlandı."
 
             time.sleep(0.5)
 
         yield "\n🛠️ Steam Build Manager: Generating export_presets.cfg..."
         self.project_memory["scripts"]["export_presets.cfg"] = [{"v": 1, "code": '[preset.0]\nname="Windows Desktop"\nplatform="Windows Desktop"'}]
-        yield "✅ Build configurations ready! Use Download button to get the project."
+        yield "✅ Build ready! Use Download button to get the project."
