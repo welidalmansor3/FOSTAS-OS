@@ -111,6 +111,10 @@ class FOSTASCore:
             temperature=0.6, 
             extra_body={"reasoning_budget": 4096}
         )
+        
+        # Yedek Mimar: Nemotron çökerse Llama 3.3 devreye girer
+        if "API Hatası" in game_plan or len(game_plan) < 50:
+            game_plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", nemotron_prompt, max_tokens=1000, temperature=0.5)
 
         # =====================================================================
         # AŞAMA 2: DEEPSEEK V4 İLE TEKNİK ŞARTNAME HAZIRLAMA (MÜHENDİS)
@@ -155,9 +159,13 @@ class FOSTASCore:
         
         code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
         
-        # Fallback: GLM başarısız olursa DeepSeek yazsın
+        # Fallback 1: GLM başarısız olursa DeepSeek yazsın
         if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
             code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", glm_prompt, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
+        
+        # Fallback 2: DeepSeek de başarısız olursa Llama 3.3 yazsın
+        if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
+            code = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", glm_prompt, max_tokens=4000, temperature=0.7)
 
         # =====================================================================
         # AŞAMA 4: GPT-OSS İLE KODU KONTROL ETME VE DÜZELTME (KALİTE KONTROL)
