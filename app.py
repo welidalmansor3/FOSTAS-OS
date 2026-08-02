@@ -52,14 +52,16 @@ with st.sidebar:
     st.subheader("🔌 NVIDIA AI Engine Status")
     status = fostas.status
     engine_map = {
-        "Nemotron (Mimar)": "nemotron",  # Yeni Eklendi
+        "Nemotron (Mimar)": "nemotron",
         "GLM-5.2 (Kod)": "glm",
         "DeepSeek V4 (GDD)": "deepseek",
         "Llama 3.3 (Planlama)": "llama",
         "GPT-OSS (Mantık)": "gpt_oss"
     }
+    
+    # KeyError Korumalı Durum Kontrolü
     for engine_name, key in engine_map.items():
-        info = status[key]
+        info = status.get(key, {"ok": False, "error": "Tanımlı değil"})
         color = "#4caf50" if info["ok"] else "#ff4b4b"
         text = "bağlı" if info["ok"] else "eksik"
         st.markdown(f"<span style='color:{color}'>●</span> {engine_name}: {text}", unsafe_allow_html=True)
