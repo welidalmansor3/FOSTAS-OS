@@ -52,6 +52,7 @@ with st.sidebar:
     st.subheader("🔌 NVIDIA AI Engine Status")
     status = fostas.status
     engine_map = {
+        "Nemotron (Mimar)": "nemotron",  # Yeni Eklendi
         "GLM-5.2 (Kod)": "glm",
         "DeepSeek V4 (GDD)": "deepseek",
         "Llama 3.3 (Planlama)": "llama",
@@ -157,7 +158,7 @@ with tab1:
             
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
-            response_placeholder.markdown("🧠 NVIDIA Tüm Ajanlar (Llama, DeepSeek, GLM, GPT-OSS) devreye giriyor... ⏳")
+            response_placeholder.markdown("🧠 NVIDIA Tüm Ajanlar (Nemotron, DeepSeek, GLM, GPT-OSS) devreye giriyor... ⏳")
             success = fostas.generate_game(prompt)
             if success:
                 response_placeholder.markdown("✅ Oyun hazır! Üstteki **'🕹️ Oyunu Dene'** sekmesine geç!")
