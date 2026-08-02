@@ -158,9 +158,42 @@ class FOSTASCore:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", f"data:application/octet-stream;base64,{model_b64}")
 
         if "<!DOCTYPE html>" in code or "<html>" in code:
+            # YAPAY ZEKA BOZUK BAĞLAMASIN DİYE BİZ KENDİMİZ BUTONU BAĞLAYAN KODU ENJEKTE EDİYORUZ
+            enforcer_script = """
+            <script>
+            window.onload = function() {
+                let btn = document.getElementById('startBtn') || document.querySelector('button');
+                if(btn) {
+                    btn.addEventListener('click', function() {
+                        let startScreen = document.getElementById('startScreen');
+                        if(startScreen) startScreen.style.display = 'none';
+                        
+                        // AI'ın yazdığı olası tüm başlatma fonksiyonlarını deniyoruz
+                        if(typeof initGame === 'function') initGame();
+                        else if(typeof startGame === 'function') startGame();
+                        else if(typeof start === 'function') start();
+                        
+                        // Eğer AI animate() fonksiyonunu yazmışsa başlatıyoruz
+                        if(typeof animate === 'function' && !window.gameStarted) {
+                            window.gameStarted = true;
+                            animate();
+                        }
+                    });
+                }
+            };
+            </script>
+            </body>
+            """
+            
+            # Eğer AI </body> etiketini kullandıysa hemen öncesine, kullanmadıysa en sona ekle
+            if "</body>" in code:
+                code = code.replace("</body>", enforcer_script)
+            else:
+                code += enforcer_script
+
             self.raw_game_html = code # İndirme butonu için temiz HTML
             
-            # Senin harika iframe srcdoc önerin:
+            # iframe srcdoc ile gösterim
             escaped_html = html_module.escape(code)
             self.game_html = f'<iframe srcdoc="{escaped_html}" style="width:100%;height:600px;border:none;overflow:hidden;"></iframe>'
             return True
