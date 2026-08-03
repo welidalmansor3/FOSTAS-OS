@@ -1,7 +1,6 @@
 import os
 import re
 import base64
-import requests
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -78,34 +77,6 @@ class FOSTASCore:
             })
         return "res://assets/" + safe_name
 
-    def auto_download_asset(self, user_prompt: str) -> bool:
-        """Kullanıcı model yüklemediyse, prompta göre internetten açık kaynak model indirir."""
-        prompt = user_prompt.lower()
-        url = None
-        
-        # Prompta göre GitHub'daki açık kaynak (CC0) modelleri seçiyoruz
-        if any(word in prompt for word in ["silah", "gun", "weapon", "fps", "shooter", "rifle"]):
-            url = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/SciFiHelmet/glTF/SciFiHelmet.gltf"
-        elif any(word in prompt for word in ["araba", "car", "vehicle", "racing", "race"]):
-            url = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/2CylinderEngine/glTF-Binary/2CylinderEngine.glb"
-        elif any(word in prompt for word in ["uçak", "plane", "aircraft", "flight"]):
-            url = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Duck/glTF-Binary/Duck.glb"
-        elif any(word in prompt for word in ["zombi", "monster", "creature", "enemy", "düşman"]):
-            url = "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/Soldier.glb"
-        else:
-            # Varsayılan: Uzaylı objesi
-            url = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Avocado/glTF-Binary/Avocado.glb"
-            
-        try:
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                filename = url.split("/")[-1]
-                self.register_user_asset(filename, response.content)
-                return True
-        except:
-            pass
-        return False
-
     def generate_game_from_doc(self):
         if not self.project_memory["docs"].strip():
             return False
@@ -117,17 +88,10 @@ class FOSTASCore:
         model_info = "Kullanıcı 3D model yüklemedi. Standart şekillerle oyunu yap."
         model_b64 = None
         
-        # EĞER KULLANICI MODEL YÜKLEMEDİYSE, INTERNETTEN OTOMATİK İNDİR!
-        if not self.project_memory["assets"]:
-            downloaded = self.auto_download_asset(user_prompt)
-            if downloaded:
-                model = self.project_memory["assets"][0]
-                model_info = "Oyunun temasına uygun açık kaynaklı bir 3D model internetten indirildi ve sisteme yüklendi. Bu modeli oyunda kullanmak ZORUNDASIN."
-        
         if self.project_memory["assets"]:
             model = self.project_memory["assets"][0]
             model_b64 = model["b64"]
-            model_info = "Kullanıcı '" + model["name"] + "' adında bir 3D model yükledi (veya sistem indirdi). Bu modeli oyunda kullanmak ZORUNDASIN."
+            model_info = "Kullanıcı '" + model["name"] + "' adında bir 3D model yükledi. Bu modeli oyunda kullanmak ZORUNDASIN."
         
         # =====================================================================
         # AŞAMA 1: NEMOTRON İLE OYUN MEKANİKLERİNİ PLANLAMA (BAŞ MİMAR)
@@ -148,6 +112,7 @@ class FOSTASCore:
             extra_body={"reasoning_budget": 4096}
         )
         
+        # Yedek Mimar: Nemotron çökerse Llama 3.3 devreye girer
         if "API Hatası" in game_plan or len(game_plan) < 50:
             game_plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", nemotron_prompt, max_tokens=1000, temperature=0.5)
 
@@ -194,9 +159,11 @@ class FOSTASCore:
         
         code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
         
+        # Fallback 1: GLM başarısız olursa DeepSeek yazsın
         if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
             code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", glm_prompt, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
         
+        # Fallback 2: DeepSeek de başarısız olursa Llama 3.3 yazsın
         if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
             code = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", glm_prompt, max_tokens=4000, temperature=0.7)
 
@@ -222,12 +189,15 @@ class FOSTASCore:
             if "<!DOCTYPE html>" in reviewed_code or "<html>" in reviewed_code:
                 code = reviewed_code
 
+        # Markdown temizliği
         code = re.sub(r"^```html\n?", "", code.strip())
         code = re.sub(r"\n?```$", "", code.strip())
 
+        # Modeli HTML'e göm
         if model_b64:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
 
+        # HTML'i kaydet
         if "<!DOCTYPE html>" in code or "<html>" in code:
             self.raw_game_html = code
             return True
