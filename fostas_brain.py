@@ -139,8 +139,9 @@ class FOSTASCore:
             "1. Output ONLY raw HTML code. Start with <!DOCTYPE html>. No markdown.\n"
             "2. Design must be modern, mobile-first (responsive), and visually stunning. Use CSS variables for theming.\n"
             "3. CRITICAL BUTTON RULE: Do NOT use addEventListener for buttons. Use INLINE ONCLICK. Example: <button onclick=\"startApp()\">Start</button>. This is mandatory.\n"
-            "4. If a start screen exists, the button must hide the start screen and show the main app. Example: document.getElementById('startScreen').style.display='none'; document.getElementById('mainApp').style.display='block';\n"
-            "5. All interactive logic must be inside <script> tags at the end of the body."
+            "4. If a start screen exists, the button must hide the start screen and show the main app.\n"
+            "5. CRITICAL IMAGE RULE: You MUST use real images from the internet. Do NOT use broken links or placeholders. For flags, use Wikimedia. For photos, use Unsplash source URLs. Example: <img src=\"https://upload.wikimedia.org/wikipedia/commons/thumb/f/6e/Flag_of_Iraq.svg/1200px-Flag_of_Iraq.svg.png\">\n"
+            "6. All interactive logic must be inside <script> tags at the end of the body."
         )
         
         code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
@@ -160,7 +161,8 @@ class FOSTASCore:
                 "Ensure it strictly has:\n"
                 "1. All buttons use inline onclick (NO addEventListener).\n"
                 "2. All JavaScript functions are properly defined and called.\n"
-                "3. The UI is mobile-responsive and visually appealing.\n\n"
+                "3. The UI is mobile-responsive and visually appealing.\n"
+                "4. Images must have valid external URLs.\n\n"
                 "Fix any bugs or broken event listeners.\n"
                 "Output ONLY the corrected, raw HTML code. No markdown fences, no explanations.\n\n"
                 "CODE TO REVIEW AND FIX:\n"
@@ -180,6 +182,54 @@ class FOSTASCore:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
 
         if "<!DOCTYPE html>" in code or "<html>" in code:
+            # NO-CODE SÜRÜKLE BIRAK EDITÖRÜ ENJEKSİYONU
+            drag_drop_script = """
+<script>
+document.querySelectorAll('img, .icon, .draggable').forEach(el => {
+    el.style.cursor = 'grab';
+    let isDragging = false;
+    let startX, startY, initialLeft, initialTop;
+
+    const computedStyle = window.getComputedStyle(el);
+    if (computedStyle.position === 'static') {
+        el.style.position = 'relative';
+    }
+
+    el.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        el.style.cursor = 'grabbing';
+        el.style.zIndex = 9999;
+        startX = e.clientX;
+        startY = e.clientY;
+        initialLeft = parseInt(computedStyle.left) || 0;
+        initialTop = parseInt(computedStyle.top) || 0;
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            el.style.left = (initialLeft + dx) + 'px';
+            el.style.top = (initialTop + dy) + 'px';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            el.style.cursor = 'grab';
+        }
+    });
+});
+</script>
+</body>
+"""
+            if "</body>" in code:
+                code = code.replace("</body>", drag_drop_script)
+            else:
+                code += drag_drop_script
+
             self.raw_game_html = code
             return True
         
