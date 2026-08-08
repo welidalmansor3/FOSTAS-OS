@@ -8,7 +8,7 @@ load_dotenv()
 
 class FOSTASCore:
     def __init__(self):
-        self.raw_game_html = ""
+        self.raw_game_html = "" # Üretilen uygulamanın HTML'i burada duracak
         self.project_memory = {
             "assets": [], 
             "docs": ""
@@ -77,33 +77,33 @@ class FOSTASCore:
             })
         return "res://assets/" + safe_name
 
-    def generate_game_from_doc(self):
+    def generate_app_from_doc(self):
         if not self.project_memory["docs"].strip():
             return False
-        return self.generate_game("Yüklenen dökümana göre bir oyun yap.")
+        return self.generate_app("Yüklenen dökümana göre bir web uygulaması yap.")
 
-    def generate_game(self, user_prompt: str) -> bool:
+    def generate_app(self, user_prompt: str) -> bool:
         doc_context = self.project_memory["docs"] if self.project_memory["docs"] else "Yok."
         
-        model_info = "Kullanıcı 3D model yüklemedi. Standart şekillerle oyunu yap."
+        model_info = "Kullanıcı medya yüklemiyor. Standart CSS görselleri kullan."
         model_b64 = None
         
         if self.project_memory["assets"]:
             model = self.project_memory["assets"][0]
             model_b64 = model["b64"]
-            model_info = "Kullanıcı '" + model["name"] + "' adında bir 3D model yükledi. Bu modeli oyunda kullanmak ZORUNDASIN."
+            model_info = "Kullanıcı '" + model["name"] + "' adında bir dosya yükledi. Bu dosyayı arayüzde bir log, resim veya ikon olarak kullan."
         
         # =====================================================================
-        # AŞAMA 1: NEMOTRON İLE OYUN MEKANİKLERİNİ PLANLAMA (BAŞ MİMAR)
+        # AŞAMA 1: NEMOTRON İLE UYGULAMA MANTIĞINI PLANLAMA (BAŞ MİMAR)
         # =====================================================================
         nemotron_prompt = (
-            "You are the Game Architect. User wants a game: \"" + user_prompt + "\".\n"
+            "You are the Lead UX/UI Architect. User wants a web app/website: \"" + user_prompt + "\".\n"
             "Context: \"" + doc_context + "\"\n"
-            "Model Info: \"" + model_info + "\"\n"
-            "Define the game mechanics, win/lose conditions, controls, and physics in 3 detailed bullet points."
+            "Media Info: \"" + model_info + "\"\n"
+            "Define the app layout, navigation flow, sections, and interactive logic in 3 detailed bullet points. Focus on mobile-first responsive design."
         )
         
-        game_plan = self._nvidia_chat(
+        app_plan = self._nvidia_chat(
             "nemotron", 
             "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", 
             nemotron_prompt, 
@@ -112,16 +112,17 @@ class FOSTASCore:
             extra_body={"reasoning_budget": 4096}
         )
         
-        # Yedek Mimar: Nemotron çökerse Llama 3.3 devreye girer
-        if "API Hatası" in game_plan or len(game_plan) < 50:
-            game_plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", nemotron_prompt, max_tokens=1000, temperature=0.5)
+        # Yedek Mimar
+        if "API Hatası" in app_plan or len(app_plan) < 50:
+            app_plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", nemotron_prompt, max_tokens=1000, temperature=0.5)
 
         # =====================================================================
         # AŞAMA 2: DEEPSEEK V4 İLE TEKNİK ŞARTNAME HAZIRLAMA (MÜHENDİS)
         # =====================================================================
         deepseek_prompt = (
-            "You are the Technical Engineer. Based on this game plan: \"" + game_plan + "\", write a detailed technical specification for an HTML5 game.\n"
-            "List the required JavaScript variables, functions (initGame, animate), and CSS elements (startBtn, startScreen).\n"
+            "You are the Frontend Engineer. Based on this app plan: \"" + app_plan + "\", write a detailed technical specification for a Web App.\n"
+            "List the required HTML structure, CSS classes (flexbox/grid), and JavaScript functions.\n"
+            "Specify how buttons will trigger functions.\n"
             "Do NOT write the full HTML yet. Just the technical blueprint."
         )
         tech_spec = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", deepseek_prompt, max_tokens=2000, extra_body={"chat_template_kwargs":{"thinking":False}})
@@ -130,31 +131,17 @@ class FOSTASCore:
         # AŞAMA 3: GLM-5.2 İLE KODU YAZMA (KODLAYICI)
         # =====================================================================
         glm_prompt = (
-            "You are the HTML5 Coder. Write a fully playable game in a SINGLE HTML file using HTML5 Canvas or Three.js.\n\n"
-            "Game Request: \"" + user_prompt + "\"\n"
-            "Model Info: \"" + model_info + "\"\n"
-            "Game Plan: \"" + game_plan + "\"\n"
+            "You are an Expert Web Developer. Write a fully functional, responsive Web App in a SINGLE HTML file using HTML, CSS, and vanilla JavaScript.\n\n"
+            "App Request: \"" + user_prompt + "\"\n"
+            "Media Info: \"" + model_info + "\"\n"
+            "App Plan: \"" + app_plan + "\"\n"
             "Technical Spec: \"" + tech_spec + "\"\n\n"
             "STRICT RULES:\n"
             "1. Output ONLY raw HTML code. Start with <!DOCTYPE html>. No markdown.\n"
-            "2. If a 3D model is provided, use Three.js. Include EXACTLY these scripts:\n"
-            "   <script src=\"https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js\"></script>\n"
-            "   <script src=\"https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js\"></script>\n"
-            "3. To load the 3D model, write EXACTLY this code:\n"
-            "   const modelUrl = \"MODEL_BASE64_PLACEHOLDER\";\n"
-            "   const loader = new THREE.GLTFLoader();\n"
-            "   loader.load(modelUrl, function(gltf) { scene.add(gltf.scene); });\n"
-            "4. Game MUST have: Start screen (id=\"startScreen\"), Start button (id=\"startBtn\"), Game Loop.\n"
-            "5. Use this EXACT JavaScript pattern for the start button:\n"
-            "   let gameStarted = false;\n"
-            "   function initGame() { gameStarted = true; animate(); }\n"
-            "   document.addEventListener('DOMContentLoaded', function() {\n"
-            "       document.getElementById('startBtn').addEventListener('click', function() {\n"
-            "           document.getElementById('startScreen').style.display = 'none';\n"
-            "           if (!gameStarted) initGame();\n"
-            "       });\n"
-            "   });\n"
-            "   function animate() { if (!gameStarted) return; requestAnimationFrame(animate); }"
+            "2. Design must be modern, mobile-first (responsive), and visually stunning. Use CSS variables for theming.\n"
+            "3. CRITICAL BUTTON RULE: Do NOT use addEventListener for buttons. Use INLINE ONCLICK. Example: <button onclick=\"startApp()\">Start</button>. This is mandatory.\n"
+            "4. If a start screen exists, the button must hide the start screen and show the main app. Example: document.getElementById('startScreen').style.display='none'; document.getElementById('mainApp').style.display='block';\n"
+            "5. All interactive logic must be inside <script> tags at the end of the body."
         )
         
         code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
@@ -172,13 +159,12 @@ class FOSTASCore:
         # =====================================================================
         if "<!DOCTYPE html>" in code or "<html>" in code:
             gpt_oss_prompt = (
-                "You are the QA Engineer. Review the following HTML5 game code.\n"
+                "You are the QA Engineer. Review the following HTML5 web app code.\n"
                 "Ensure it strictly has:\n"
-                "1. A start button with id=\"startBtn\".\n"
-                "2. A start screen with id=\"startScreen\".\n"
-                "3. The game loop is NOT auto-starting.\n"
-                "4. The startBtn correctly hides the startScreen and calls initGame().\n\n"
-                "Fix any bugs, missing tags, or broken event listeners.\n"
+                "1. All buttons use inline onclick (NO addEventListener).\n"
+                "2. All JavaScript functions are properly defined and called.\n"
+                "3. The UI is mobile-responsive and visually appealing.\n\n"
+                "Fix any bugs or broken event listeners.\n"
                 "Output ONLY the corrected, raw HTML code. No markdown fences, no explanations.\n\n"
                 "CODE TO REVIEW AND FIX:\n"
                 + code
@@ -193,7 +179,7 @@ class FOSTASCore:
         code = re.sub(r"^```html\n?", "", code.strip())
         code = re.sub(r"\n?```$", "", code.strip())
 
-        # Modeli HTML'e göm
+        # Dosyayı HTML'e göm
         if model_b64:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
 
@@ -202,5 +188,5 @@ class FOSTASCore:
             self.raw_game_html = code
             return True
         
-        self.raw_game_html = "<h1 style='color:red;text-align:center;'>Oyun üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
+        self.raw_game_html = "<h1 style='color:red;text-align:center;'>Uygulama üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
         return False
