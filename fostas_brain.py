@@ -112,7 +112,6 @@ class FOSTASCore:
             extra_body={"reasoning_budget": 4096}
         )
         
-        # Yedek Mimar
         if "API Hatası" in app_plan or len(app_plan) < 50:
             app_plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", nemotron_prompt, max_tokens=1000, temperature=0.5)
 
@@ -146,11 +145,9 @@ class FOSTASCore:
         
         code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
         
-        # Fallback 1: GLM başarısız olursa DeepSeek yazsın
         if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
             code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", glm_prompt, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
         
-        # Fallback 2: DeepSeek de başarısız olursa Llama 3.3 yazsın
         if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
             code = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", glm_prompt, max_tokens=4000, temperature=0.7)
 
@@ -179,11 +176,9 @@ class FOSTASCore:
         code = re.sub(r"^```html\n?", "", code.strip())
         code = re.sub(r"\n?```$", "", code.strip())
 
-        # Dosyayı HTML'e göm
         if model_b64:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
 
-        # HTML'i kaydet
         if "<!DOCTYPE html>" in code or "<html>" in code:
             self.raw_game_html = code
             return True
