@@ -34,7 +34,7 @@ class FOSTASCore:
                 except Exception as e:
                     self.status[model_name] = {"ok": False, "error": str(e)}
             else:
-                    self.status[model_name] = {"ok": False, "error": "Key .env dosyasında yok."}
+                self.status[model_name] = {"ok": False, "error": "Key .env dosyasında yok."}
 
     def _nvidia_chat(self, model_client: str, model_name: str, prompt: str, max_tokens: int = 4096, temperature: float = 0.7, extra_body: dict = None) -> str:
         if model_client not in self.clients:
@@ -120,4 +120,115 @@ class FOSTASCore:
             "Technical Spec: \"" + tech_spec + "\"\n\n"
             "STRICT RULES:\n"
             "1. Output ONLY raw HTML code. Start with <!DOCTYPE html>. No markdown.\n"
-            "2. Design must be modern, mobile-first (responsive),
+            "2. Design must be modern, mobile-first (responsive), and visually stunning.\n"
+            "3. CRITICAL BUTTON RULE: Do NOT use addEventListener. Use INLINE ONCLICK. Example: <button onclick=\"startApp()\">Start</button>.\n"
+            "4. If a start screen exists, the button must hide the start screen and show the main app.\n"
+            "5. CRITICAL IMAGE RULE: You MUST use real images from the internet. For flags, use Wikimedia. For photos, use Unsplash source URLs.\n"
+            "6. All JavaScript functions MUST be declared as: function functionName() { ... } so they are globally accessible."
+        )
+        code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
+        
+        if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
+            code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", glm_prompt, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
+        if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
+            code = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", glm_prompt, max_tokens=4000, temperature=0.7)
+
+        # AŞAMA 4: GPT-OSS (QA)
+        if "<!DOCTYPE html>" in code or "<html>" in code:
+            gpt_oss_prompt = (
+                "You are the QA Engineer. Review the following HTML5 web app code.\n"
+                "Ensure it strictly has:\n"
+                "1. All buttons use inline onclick (NO addEventListener).\n"
+                "2. All JavaScript functions are globally declared (function funcName()).\n"
+                "3. The UI is mobile-responsive and visually appealing.\n"
+                "4. Images must have valid external URLs.\n\n"
+                "Fix any bugs or broken event listeners.\n"
+                "Output ONLY the corrected, raw HTML code. No markdown fences, no explanations.\n\n"
+                "CODE TO REVIEW AND FIX:\n"
+                + code
+            )
+            reviewed_code = self._nvidia_chat("gpt_oss", "openai/gpt-oss-120b", gpt_oss_prompt, max_tokens=8000)
+            if "<!DOCTYPE html>" in reviewed_code or "<html>" in reviewed_code:
+                code = reviewed_code
+
+        # Markdown temizliği
+        code = re.sub(r"^```html\n?", "", code.strip())
+        code = re.sub(r"\n?```$", "", code.strip())
+
+        if model_b64:
+            code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
+
+        if "<!DOCTYPE html>" in code or "<html>" in code:
+            # NÜKLEER ÇÖZÜM: GLOBAL BUTON YAKALAYICI VE SÜRÜKLE-BIRAK EDİTÖRÜ
+            enforcer_script = """
+<script>
+window.addEventListener('load', function() {
+    // 1. SÜRÜKLE BIRAK (DRAG & DROP) AKTİF EDİLEN RESİMLER
+    document.querySelectorAll('img, .icon, .draggable').forEach(el => {
+        el.style.cursor = 'grab';
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+
+        const computedStyle = window.getComputedStyle(el);
+        if (computedStyle.position === 'static') {
+            el.style.position = 'relative';
+        }
+
+        el.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            el.style.cursor = 'grabbing';
+            el.style.zIndex = 9999;
+            startX = e.clientX;
+            startY = e.clientY;
+            initialLeft = parseInt(computedStyle.left) || 0;
+            initialTop = parseInt(computedStyle.top) || 0;
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                el.style.left = (initialLeft + dx) + 'px';
+                el.style.top = (initialTop + dy) + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                el.style.cursor = 'grab';
+            }
+        });
+    });
+
+    // 2. BUTON YAKALAYICI (EĞER ONCLICK YOKSA OTOMATİK BAĞLA)
+    document.querySelectorAll('button').forEach(btn => {
+        if (!btn.hasAttribute('onclick')) {
+            btn.addEventListener('click', function() {
+                if(typeof startApp === 'function') startApp();
+                else if(typeof initGame === 'function') initGame();
+                else if(typeof startGame === 'function') startGame();
+                else if(typeof beginApp === 'function') beginApp();
+                
+                let ss = document.getElementById('startScreen');
+                if(ss) ss.style.display = 'none';
+                let ma = document.getElementById('mainApp');
+                if(ma) ma.style.display = 'block';
+            });
+        }
+    });
+});
+</script>
+</body>
+"""
+            if "</body>" in code:
+                code = code.replace("</body>", enforcer_script)
+            else:
+                code += enforcer_script
+
+            self.raw_game_html = code
+            return True
+        
+        self.raw_game_html = "<h1 style='color:red;text-align:center;'>Uygulama üretilemedi. Lütfen daha basit bir prompt deneyin.</h1>"
+        return False
