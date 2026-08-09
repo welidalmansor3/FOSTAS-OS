@@ -27,7 +27,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Session state başlatma
 if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
 if 'messages' not in st.session_state:
@@ -45,7 +44,6 @@ def read_uploaded_file(uploaded_file):
     else:
         return uploaded_file.read().decode("utf-8")
 
-# SIDEBAR
 with st.sidebar:
     st.header("📁 FOSTAS Workspace")
     
@@ -90,7 +88,6 @@ with st.sidebar:
     else:
         st.write("Henüz dosya yok.")
 
-# ANA EKRAN
 st.title("📱 FOSTAS OS - AI App Studio")
 st.subheader("Irak'ın Teknoloji Endüstrisine Açılan Kapı 🇮🇶")
 
@@ -99,7 +96,6 @@ tab1, tab2 = st.tabs(["🛠️ Uygulama Üret", "📲 Uygulamayı Dene ve İndir
 with tab1:
     st.header("💬 Uygulama Fikrini Yaz veya Yükle")
     
-    # ŞABLLOLAR
     st.subheader("🚀 Hızlı Başlangıç Şablonları")
     templates = [
         "Serbest (Kendi Fikrini Yaz)",
@@ -134,7 +130,6 @@ with tab1:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Şablon seçildiyse buton göster, yoksa normal chat input
     if selected_template != "Serbest (Kendi Fikrini Yaz)":
         if st.button(f"🚀 '{selected_template}' Şablonunu AI'a Gönder", use_container_width=True):
             prompt = selected_template
@@ -163,11 +158,9 @@ with tab2:
     st.header("📲 Uygulama Önizleme")
     st.write("Üretilen uygulama aşağıda açılacaktır. Butonlara tıklayarak test edebilirsin.")
     
-    # Direkt AI'ın yazdığı temiz HTML'i components.html içine veriyoruz.
     if fostas.raw_game_html:
         components.html(fostas.raw_game_html, height=650, scrolling=True)
         
-        # UYGULAMAYI İNDİRME BUTONU
         st.markdown("---")
         st.download_button(
             label="⬇️ Uygulamayı Bilgisayara İndir (HTML)",
