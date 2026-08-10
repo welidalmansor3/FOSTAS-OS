@@ -8,7 +8,7 @@ import docx
 
 from fostas_brain import FOSTASCore
 
-st.set_page_config(page_title="FOSTAS OS - AI App Studio", page_icon="📱", layout="wide")
+st.set_page_config(page_title="FOSTAS OS - AI Studio", page_icon="🚀", layout="wide")
 
 st.markdown("""
 <style>
@@ -30,7 +30,7 @@ st.markdown("""
 if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
 if 'messages' not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Kanka hoş geldin! FOSTAS App Studio'ya. Bana istediğin web sitesini veya telefon uygulamasını tasvir et, anında yapayım! Örn: 'Bana Irak Müzeleri rehberi mobil uygulama yap'."}]
+    st.session_state.messages = [{"role": "assistant", "content": "Kanka hoş geldin! FOSTAS AI Studio'ya. İster 2D/3D oyun, ister web sitesi iste, anında yapayım! Örn: 'Bana Irak Müzeleri rehberi yap' veya 'Uzay savaşı oyunu yap'."}]
 
 fostas = st.session_state.fostas
 
@@ -64,9 +64,9 @@ with st.sidebar:
         st.markdown(f"<span style='color:{color}'>●</span> {engine_name}: {text}", unsafe_allow_html=True)
     st.markdown("---")
 
-    st.subheader("📥 Logo / Resim Yükle")
-    st.warning("Uygulamada kullanmak için bir resim (PNG/JPG) yükleyebilirsin.")
-    uploaded_3d = st.file_uploader("Dosya Yükle", type=["zip", "png", "jpg", "jpeg", "glb"], key="3d_uploader")
+    st.subheader("📥 Görsel / 3D Model Yükle")
+    st.warning("Oyun veya uygulamada kullanmak için dosya yükle.")
+    uploaded_3d = st.file_uploader("Dosya Yükle", type=["zip", "png", "jpg", "jpeg", "glb", "gltf"], key="3d_uploader")
     
     if uploaded_3d is not None:
         fostas.register_user_asset(uploaded_3d.name, uploaded_3d.getvalue())
@@ -88,42 +88,41 @@ with st.sidebar:
     else:
         st.write("Henüz dosya yok.")
 
-st.title("📱 FOSTAS OS - AI App Studio")
-st.subheader("Irak'ın Teknoloji Endüstrisine Açılan Kapı 🇮🇶")
+st.title("🚀 FOSTAS OS - AI Studio")
+st.subheader("Oyun ve Uygulama Üreten Multi-Agent Yapay Zeka 🇮🇶")
 
-tab1, tab2 = st.tabs(["🛠️ Uygulama Üret", "📲 Uygulamayı Dene ve İndir"])
+tab1, tab2 = st.tabs(["🛠️ Üretim Stüdyosu", "🎮 Oyna / 📱 Uygulamayı Dene"])
 
 with tab1:
-    st.header("💬 Uygulama Fikrini Yaz veya Yükle")
+    st.header("💬 Fikrini Yaz veya Şablon Seç")
     
     st.subheader("🚀 Hızlı Başlangıç Şablonları")
     templates = [
         "Serbest (Kendi Fikrini Yaz)",
-        "Mobil Uyumlu Restoran Menü Uygulaması",
+        "2D Araba Yarışı Oyunu",
+        "Uzay Saldırısı Oyunu (Meteorları patlat)",
         "Irak Müzeleri Rehberi Web Uygulaması",
         "Kişisel Portföy / CV Web Sitesi",
-        "İşletme Tanıtım Sayfası (Landing Page)",
-        "Basit Alışveriş Sepeti Uygulaması"
+        "Mobil Uyumlu Restoran Menü Uygulaması"
     ]
     selected_template = st.selectbox("Bir şablon seç veya kendi promptunu yaz:", templates)
     
     with st.expander("📎 Doküman Yükle (Fikir / İçerik)"):
         uploaded_file = st.file_uploader("PDF, DOCX, TXT, MD", type=["pdf", "docx", "txt", "md"], label_visibility="collapsed")
         if uploaded_file is not None:
-            if st.button("📄 Dökümanı AI'a Okut ve Uygulama Yap", key="read_doc"):
+            if st.button("📄 Dökümanı AI'a Okut ve Üret", key="read_doc"):
                 text = read_uploaded_file(uploaded_file)
                 fostas.upload_document(text)
-                st.session_state.messages.append({"role": "user", "content": "Yüklenen dosyaya göre uygulama üret!"})
+                st.session_state.messages.append({"role": "user", "content": "Yüklenen dosyaya göre üret!"})
                 with st.chat_message("user"):
-                    st.markdown("Yüklenen dosyaya göre uygulama üret!")
+                    st.markdown("Yüklenen dosyaya göre üret!")
                 with st.chat_message("assistant"):
                     response_placeholder = st.empty()
-                    response_placeholder.markdown("🧠 Döküman okunuyor ve AI modelleriyle uygulama yazılıyor... ⏳")
-                    success = fostas.generate_app_from_doc()
-                    if success:
-                        response_placeholder.markdown("✅ Uygulama hazır! **'📲 Uygulamayı Dene'** sekmesine geç!")
-                    else:
-                        response_placeholder.markdown("⚠️ Uygulama üretilirken bir sorun oluştu.")
+                    full_response = ""
+                    for status_update in fostas.generate_app_from_doc():
+                        full_response += status_update + "\n\n"
+                        response_placeholder.markdown(full_response + "▌")
+                    response_placeholder.markdown(full_response)
                 st.rerun()
 
     for message in st.session_state.messages:
@@ -136,7 +135,7 @@ with tab1:
         else:
             prompt = None
     else:
-        prompt = st.chat_input("Ne uygulaması yapalım? (Örn: Bana bir spor haberleri sitesi yap)")
+        prompt = st.chat_input("Ne yapalım? (Örn: Bana futbol penaltı oyunu yap)")
 
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -145,28 +144,27 @@ with tab1:
             
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
-            response_placeholder.markdown("🧠 NVIDIA Tüm Ajanlar (Nemotron, DeepSeek, GLM, GPT-OSS) tasarlıyor... ⏳")
-            success = fostas.generate_app(prompt)
-            if success:
-                response_placeholder.markdown("✅ Uygulama hazır! Üstteki **'📲 Uygulamayı Dene'** sekmesine geç!")
-                st.session_state.messages.append({"role": "assistant", "content": "✅ Uygulama hazır! 'Uygulamayı Dene' sekmesine geç."})
-            else:
-                response_placeholder.markdown("⚠️ Uygulama üretilirken bir sorun oluştu. Lütfen farklı bir prompt dene.")
+            full_response = ""
+            for status_update in fostas.generate_app(prompt):
+                full_response += status_update + "\n\n"
+                response_placeholder.markdown(full_response + "▌")
+            response_placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
             st.rerun()
 
 with tab2:
-    st.header("📲 Uygulama Önizleme")
-    st.write("Üretilen uygulama aşağıda açılacaktır. Butonlara tıklayarak test edebilirsin.")
+    st.header("🎮 Oyun / 📱 Uygulama Alanı")
+    st.write("Üretilen içerik aşağıda açılacaktır. Butonlara tıklayarak test edebilir, görselleri fareyle taşıyabilirsin.")
     
     if fostas.raw_game_html:
         components.html(fostas.raw_game_html, height=650, scrolling=True)
         
         st.markdown("---")
         st.download_button(
-            label="⬇️ Uygulamayı Bilgisayara İndir (HTML)",
+            label="⬇️ Bilgisayara İndir (HTML)",
             data=fostas.raw_game_html.encode('utf-8'),
-            file_name="fostas_uygulamam.html",
+            file_name="fostas_proje.html",
             mime="text/html"
         )
     else:
-        st.warning("Henüz bir uygulama üretilmedi. Lütfen 'Uygulama Üret' sekmesine git ve bir fikir yaz!")
+        st.warning("Henüz bir üretim yapılmadı. Lütfen 'Üretim Stüdyosu' sekmesine git ve bir fikir yaz!")
