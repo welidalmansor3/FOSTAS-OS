@@ -36,11 +36,11 @@ class FOSTASCore:
             else:
                 self.status[model_name] = {"ok": False, "error": "Key .env dosyasında yok."}
 
-    def _nvidia_chat(self, model_client: str, model_name: str, prompt: str, max_tokens: int = 4096, temperature: float = 0.7, extra_body: dict = None) -> str:
-        if model_client not in self.clients:
-            return "Hata: Client bağlı değil."
+    def _nvidia_chat(self, client_key: str, model_name: str, prompt: str, max_tokens: int = 4096, temperature: float = 0.7, extra_body: dict = None) -> str:
+        if client_key not in self.clients:
+            return ""
         
-        client = self.clients[model_client]
+        client = self.clients[client_key]
         try:
             kwargs = {
                 "model": model_name,
@@ -53,9 +53,9 @@ class FOSTASCore:
                 kwargs["extra_body"] = extra_body
 
             completion = client.chat.completions.create(**kwargs)
-            return completion.choices[0].message.content
-        except Exception as e:
-            return "API Hatası: " + str(e)
+            return completion.choices[0].message.content or ""
+        except Exception:
+            return ""
 
     def upload_document(self, text: str):
         self.project_memory["docs"] += "\n\n--- USER UPLOAD ---\n" + text[:3000]
@@ -77,78 +77,98 @@ class FOSTASCore:
             })
         return "res://assets/" + safe_name
 
+    def _clean_html_code(self, code: str) -> str:
+        code = code.strip()
+        if code.startswith("```"):
+            code = re.sub(r"^```[a-zA-Z]*\n?", "", code)
+            code = re.sub(r"\n?```$", "", code)
+        code = code.replace("```html", "").replace("```", "")
+        return code.strip()
+
     def generate_app_from_doc(self):
         if not self.project_memory["docs"].strip():
             return False
-        return self.generate_app("Yüklenen dökümana göre bir web uygulaması yap.")
+        return self.generate_app("Yüklenen dökümana göre bir uygulama/oyun yap.")
 
-    def generate_app(self, user_prompt: str) -> bool:
+    def generate_app(self, user_prompt: str):
+        """Generator function to yield status updates to the UI"""
         doc_context = self.project_memory["docs"] if self.project_memory["docs"] else "Yok."
         
-        model_info = "Kullanıcı medya yüklemiyor. Standart CSS görselleri kullan."
+        model_info = "Kullanıcı medya yüklemiyor. Sadece CSS ve Emoji kullan."
         model_b64 = None
         
         if self.project_memory["assets"]:
             model = self.project_memory["assets"][0]
             model_b64 = model["b64"]
-            model_info = "Kullanıcı '" + model["name"] + "' adında bir dosya yükledi. Bu dosyayı arayüzde kullan."
+            model_info = "Kullanıcı '" + model["name"] + "' adında bir dosya yükledi. Bu dosyayı (MODEL_BASE64_PLACEHOLDER) arayüzde kullan."
         
         # AŞAMA 1: NEMOTRON
-        nemotron_prompt = "You are the Lead UX/UI Architect. User wants a web app: \"" + user_prompt + "\". Context: \"" + doc_context + "\". Define app layout in 3 bullet points."
-        app_plan = self._nvidia_chat("nemotron", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", nemotron_prompt, max_tokens=8000, temperature=0.6, extra_body={"reasoning_budget": 4096})
-        if "API Hatası" in app_plan or len(app_plan) < 50:
-            app_plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", nemotron_prompt, max_tokens=1000, temperature=0.5)
+        yield "🧠 Aşama 1: Nemotron (Mimar) tasarımı planlıyor..."
+        p1 = "You are Lead Architect. Request: \"" + user_prompt + "\". Context: \"" + doc_context + "\". Define layout, mechanics, UI in 3 bullets."
+        plan = self._nvidia_chat("nemotron", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", p1, max_tokens=4000, extra_body={"reasoning_budget": 2048})
+        if not plan or len(plan) < 20:
+            yield "⚠️ Nemotron yanıt vermedi, Llama devreye giriyor..."
+            plan = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", p1, max_tokens=1000)
 
         # AŞAMA 2: DEEPSEEK
-        deepseek_prompt = "You are the Frontend Engineer. Plan: \"" + app_plan + "\". Write technical specification for Web App. List HTML, CSS, JS functions."
-        tech_spec = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", deepseek_prompt, max_tokens=2000, extra_body={"chat_template_kwargs":{"thinking":False}})
+        yield "⚙️ Aşama 2: DeepSeek (Mühendis) teknik şartname yazıyor..."
+        p2 = "You are Frontend Engineer. Plan: \"" + plan + "\". Write technical spec for HTML/JS. List functions."
+        spec = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", p2, max_tokens=2000, extra_body={"chat_template_kwargs":{"thinking":False}})
 
         # AŞAMA 3: GLM-5.2
-        glm_prompt = "You are an Expert Web Developer. Write a fully functional responsive Web App in a SINGLE HTML file. Request: \"" + user_prompt + "\". Plan: \"" + app_plan + "\". Spec: \"" + tech_spec + "\".\nSTRICT RULES:\n1. ONLY raw HTML code. No markdown.\n2. Mobile-first responsive.\n3. CRITICAL BUTTON RULE: Use INLINE ONCLICK. NO addEventListener.\n4. CRITICAL IMAGE RULE: Use real images from internet (Wikimedia/Unsplash).\n5. All JS functions MUST be global (function name() { })."
+        yield "💻 Aşama 3: GLM-5.2 (Kodlayıcı) kodu yazıyor..."
+        p3 = (
+            "Write a fully functional responsive App/Game in a SINGLE HTML file. Request: \"" + user_prompt + "\". Plan: \"" + plan + "\". Spec: \"" + spec + "\".\n"
+            "STRICT RULES:\n"
+            "1. ONLY raw HTML code. No markdown.\n"
+            "2. Mobile-first responsive, modern design.\n"
+            "3. CRITICAL BUTTON RULE: Use INLINE ONCLICK. NO addEventListener.\n"
+            "4. CRITICAL IMAGE RULE: Use real images from Wikimedia/Unsplash. If not possible, use CSS Gradients/Emojis. NO broken images.\n"
+            "5. All JS functions MUST be global: function name() { }."
+        )
+        code = self._nvidia_chat("glm", "z-ai/glm-5.2", p3, max_tokens=8000, temperature=0.8)
         
-        code = self._nvidia_chat("glm", "z-ai/glm-5.2", glm_prompt, max_tokens=8000, temperature=0.8)
+        if not code or "<!DOCTYPE html>" not in code:
+            yield "⚠️ GLM başarısız oldu, DeepSeek kodu yazıyor..."
+            code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", p3, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
         
-        if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
-            code = self._nvidia_chat("deepseek", "deepseek-ai/deepseek-v4-pro", glm_prompt, max_tokens=8000, extra_body={"chat_template_kwargs":{"thinking":False}})
-        if "API Hatası" in code or len(code) < 100 or "<!DOCTYPE html>" not in code:
-            code = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", glm_prompt, max_tokens=4000, temperature=0.7)
+        if not code or "<!DOCTYPE html>" not in code:
+            yield "⚠️ DeepSeek de başarısız, Llama son çare devreye giriyor..."
+            code = self._nvidia_chat("llama", "meta/llama-3.3-70b-instruct", p3, max_tokens=4000, temperature=0.7)
 
-        # AŞAMA 4: GPT-OSS (QA)
-        if "<!DOCTYPE html>" in code or "<html>" in code:
-            gpt_oss_prompt = "You are QA Engineer. Review this HTML code. Ensure: 1. Inline onclick for all buttons. 2. Global JS functions. 3. Valid image URLs. Fix bugs. Output ONLY raw HTML.\nCODE:\n" + code
-            reviewed_code = self._nvidia_chat("gpt_oss", "openai/gpt-oss-120b", gpt_oss_prompt, max_tokens=8000)
-            if "<!DOCTYPE html>" in reviewed_code or "<html>" in reviewed_code:
-                code = reviewed_code
+        # AŞAMA 4: GPT-OSS
+        if code and "<!DOCTYPE html>" in code:
+            yield "🔍 Aşama 4: GPT-OSS (Kalite Kontrol) denetliyor ve düzeltiyor..."
+            p4 = "You are QA. Review HTML. Ensure: 1. Inline onclick. 2. Global JS. 3. Valid images or CSS fallback. Fix bugs. Output ONLY raw HTML.\nCODE:\n" + code
+            reviewed = self._nvidia_chat("gpt_oss", "openai/gpt-oss-120b", p4, max_tokens=8000)
+            if reviewed and "<!DOCTYPE html>" in reviewed:
+                code = reviewed
 
-        # Markdown temizliği
-        code = re.sub(r"^```html\n?", "", code.strip())
-        code = re.sub(r"\n?```$", "", code.strip())
+        # Temizlik
+        if code:
+            code = self._clean_html_code(code)
 
-        if model_b64:
+        if model_b64 and code:
             code = code.replace("MODEL_BASE64_PLACEHOLDER", "data:application/octet-stream;base64," + model_b64)
 
-        if "<!DOCTYPE html>" in code or "<html>" in code:
-            # NÜKLEER ÇÖZÜM: GLOBAL BUTON YAKALAYICI VE SÜRÜKLE-BIRAK
-            enforcer_script = """
+        if code and "<!DOCTYPE html>" in code:
+            # Enforcer Script
+            enforcer = """
 <script>
 window.addEventListener('load', function() {
     document.querySelectorAll('img, .icon, .draggable').forEach(el => {
         el.style.cursor = 'grab';
-        let isDragging = false;
-        let startX, startY, initialLeft, initialTop;
-        const computedStyle = window.getComputedStyle(el);
-        if (computedStyle.position === 'static') { el.style.position = 'relative'; }
+        let isDragging = false, startX, startY, iLeft, iTop;
+        const cs = window.getComputedStyle(el);
+        if (cs.position === 'static') { el.style.position = 'relative'; }
         el.addEventListener('mousedown', (e) => {
             isDragging = true; el.style.cursor = 'grabbing'; el.style.zIndex = 9999;
             startX = e.clientX; startY = e.clientY;
-            initialLeft = parseInt(computedStyle.left) || 0; initialTop = parseInt(computedStyle.top) || 0;
+            iLeft = parseInt(cs.left) || 0; iTop = parseInt(cs.top) || 0;
             e.preventDefault();
         });
         document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                el.style.left = (initialLeft + (e.clientX - startX)) + 'px';
-                el.style.top = (initialTop + (e.clientY - startY)) + 'px';
-            }
+            if (isDragging) { el.style.left = (iLeft + e.clientX - startX) + 'px'; el.style.top = (iTop + e.clientY - startY) + 'px'; }
         });
         document.addEventListener('mouseup', () => { if (isDragging) { isDragging = false; el.style.cursor = 'grab'; } });
     });
@@ -159,11 +179,8 @@ window.addEventListener('load', function() {
                 if(typeof startApp === 'function') startApp();
                 else if(typeof initGame === 'function') initGame();
                 else if(typeof startGame === 'function') startGame();
-                else if(typeof beginApp === 'function') beginApp();
-                let ss = document.getElementById('startScreen');
-                if(ss) ss.style.display = 'none';
-                let ma = document.getElementById('mainApp');
-                if(ma) ma.style.display = 'block';
+                let ss = document.getElementById('startScreen'); if(ss) ss.style.display = 'none';
+                let ma = document.getElementById('mainApp'); if(ma) ma.style.display = 'block';
             });
         }
     });
@@ -172,12 +189,14 @@ window.addEventListener('load', function() {
 </body>
 """
             if "</body>" in code:
-                code = code.replace("</body>", enforcer_script)
+                code = code.replace("</body>", enforcer)
             else:
-                code += enforcer_script
+                code += enforcer
 
             self.raw_game_html = code
+            yield "✅ Üretim tamamlandı! 'Dene ve İndir' sekmesine geçebilirsin."
             return True
         
-        self.raw_game_html = "<h1 style='color:red;text-align:center;'>Uygulama üretilemedi.</h1>"
+        self.raw_game_html = "<!DOCTYPE html><html><body style='background:#111;color:#fff;text-align:center;padding:50px;'><h1>Üretim başarısız oldu.</h1></body></html>"
+        yield "❌ Tüm modeller başarısız oldu. Lütfen farklı bir prompt dene."
         return False
