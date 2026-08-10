@@ -87,8 +87,9 @@ class FOSTASCore:
 
     def generate_app_from_doc(self):
         if not self.project_memory["docs"].strip():
-            return False
-        return self.generate_app("Yüklenen dökümana göre bir uygulama/oyun yap.")
+            yield "⚠️ Önce bir döküman yükle."
+            return
+        yield from self.generate_app("Yüklenen dökümana göre bir uygulama/oyun yap.")
 
     def generate_app(self, user_prompt: str):
         """Generator function to yield status updates to the UI"""
@@ -194,9 +195,7 @@ window.addEventListener('load', function() {
                 code += enforcer
 
             self.raw_game_html = code
-            yield "✅ Üretim tamamlandı! 'Dene ve İndir' sekmesine geçebilirsin."
-            return True
-        
-        self.raw_game_html = "<!DOCTYPE html><html><body style='background:#111;color:#fff;text-align:center;padding:50px;'><h1>Üretim başarısız oldu.</h1></body></html>"
-        yield "❌ Tüm modeller başarısız oldu. Lütfen farklı bir prompt dene."
-        return False
+            yield "✅ Üretim tamamlandı! 'Oyna / Uygulamayı Dene' sekmesine geçebilirsin."
+        else:
+            self.raw_game_html = "<!DOCTYPE html><html><body style='background:#111;color:#fff;text-align:center;padding:50px;'><h1>Üretim başarısız oldu.</h1></body></html>"
+            yield "❌ Tüm modeller başarısız oldu. Lütfen farklı bir prompt dene."
