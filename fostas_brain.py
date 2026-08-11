@@ -2,32 +2,28 @@ import os
 import re
 import base64
 import time
-import requests
-from io import BytesIO
 from openai import OpenAI
 from dotenv import load_dotenv
-from PIL import Image
 
 load_dotenv()
 
 
 class FOSTASCore:
     """
-    FOSTAS: Multi-Agent AI App Studio with Auto Image Download
-    - Nemotron: UX/UI Architect (Plans the app/game)
-    - DeepSeek: Technical Architect (Specs)
-    - GLM-5.2: Code Master (Writes HTML/JS/Canvas + Finds Images)
-    - GPT-OSS: QA Inspector (Tests code)
-    - Llama 3.3: Fallback Engine (Emergency backup)
+    FOSTAS: Multi-Agent AI App Studio with SVG + Emoji Graphics
+    - Nemotron: UX/UI Architect
+    - DeepSeek: Technical Architect
+    - GLM-5.2: Code Master (Writes HTML/JS + SVG Graphics)
+    - GPT-OSS: QA Inspector
+    - Llama 3.3: Fallback Engine
     """
 
     def __init__(self):
         self.raw_game_html = ""
         self.project_memory = {
-            "assets": [],  # User uploaded images/files
-            "docs": "",    # User uploaded documents
-            "app_type": None,  # "game" or "website"
-            "downloaded_images": []  # Downloaded from web
+            "assets": [],
+            "docs": "",
+            "app_type": None
         }
         
         # Initialize NVIDIA API clients
@@ -87,63 +83,6 @@ class FOSTASCore:
         except Exception as e:
             return f"ERROR: {str(e)}"
 
-    def _download_image_from_web(self, image_url: str, timeout=5) -> str:
-        """
-        Download image from URL and convert to base64 data URI
-        Returns: data:image/...;base64,... or empty string if failed
-        """
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            response = requests.get(image_url, headers=headers, timeout=timeout)
-            response.raise_for_status()
-            
-            # Detect image type
-            content_type = response.headers.get('content-type', 'image/jpeg')
-            if 'png' in content_type:
-                mime_type = 'image/png'
-            elif 'gif' in content_type:
-                mime_type = 'image/gif'
-            elif 'webp' in content_type:
-                mime_type = 'image/webp'
-            else:
-                mime_type = 'image/jpeg'
-            
-            # Convert to base64
-            img_base64 = base64.b64encode(response.content).decode('utf-8')
-            data_uri = f"data:{mime_type};base64,{img_base64}"
-            
-            self._log_step("🖼️ Image Downloader", f"Downloaded: {image_url[:50]}...")
-            return data_uri
-            
-        except Exception as e:
-            self._log_step("⚠️ Image Downloader", f"Failed to download: {str(e)[:50]}")
-            return ""
-
-    def _extract_and_download_images(self, html_code: str) -> str:
-        """
-        Find image URLs in HTML and download them, replace with data URIs
-        """
-        # Find all src="..." patterns
-        img_pattern = r'src=["\']([^"\']+)["\']'
-        urls = re.findall(img_pattern, html_code)
-        
-        for url in urls:
-            # Skip data URIs and relative paths
-            if url.startswith('data:') or url.startswith('/') or url.startswith('#'):
-                continue
-            
-            # Try to download
-            if url.startswith('http'):
-                data_uri = self._download_image_from_web(url)
-                if data_uri:
-                    # Replace URL with data URI
-                    html_code = html_code.replace(f'src="{url}"', f'src="{data_uri}"')
-                    html_code = html_code.replace(f"src='{url}'", f"src='{data_uri}'")
-        
-        return html_code
-
     def upload_document(self, text: str):
         """Store user uploaded document"""
         self.project_memory["docs"] = text[:5000]
@@ -179,8 +118,6 @@ class FOSTASCore:
             "gif": "image/gif",
             "svg": "image/svg+xml",
             "webp": "image/webp",
-            "glb": "model/gltf-binary",
-            "zip": "application/zip"
         }
         return mime_map.get(ext, "application/octet-stream")
 
@@ -206,8 +143,6 @@ class FOSTASCore:
         code = code.replace("{{ASSET}}", data_uri)
         code = code.replace("USER_ASSET", data_uri)
         code = code.replace("{{LOGO}}", data_uri)
-        code = code.replace("PLACEHOLDER_IMAGE", data_uri)
-        code = code.replace("{{PLACEHOLDER}}", data_uri)
         
         if mime.startswith("image/"):
             code = re.sub(r'src=["\']USER_[^"\']*["\']', f'src="{data_uri}"', code)
@@ -216,7 +151,7 @@ class FOSTASCore:
         return code
 
     def _create_fallback_html(self, prompt: str) -> str:
-        """Create a beautiful fallback HTML if all models fail"""
+        """Create a beautiful fallback HTML"""
         emoji_map = {
             "oyun": "🎮",
             "game": "🎮",
@@ -323,12 +258,6 @@ class FOSTASCore:
             text-align: left;
         }}
         
-        .info p {{
-            color: #666;
-            margin: 10px 0;
-            line-height: 1.6;
-        }}
-        
         .features {{
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -354,19 +283,6 @@ class FOSTASCore:
             margin-bottom: 5px;
         }}
         
-        .feature-desc {{
-            color: #666;
-            font-size: 14px;
-        }}
-        
-        .button-group {{
-            margin-top: 30px;
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }}
-        
         button {{
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -378,6 +294,7 @@ class FOSTASCore:
             cursor: pointer;
             transition: all 0.3s;
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            margin-top: 20px;
         }}
         
         button:hover {{
@@ -385,53 +302,18 @@ class FOSTASCore:
             box-shadow: 0 8px 20px rgba(102, 126, 234, 0.6);
         }}
         
-        button:active {{
-            transform: translateY(0);
-        }}
-        
-        .secondary {{
-            background: white;
-            color: #667eea;
-            border: 2px solid #667eea;
-            box-shadow: none;
-        }}
-        
-        .secondary:hover {{
-            background: #667eea;
-            color: white;
-        }}
-        
-        footer {{
-            margin-top: 30px;
-            color: #999;
-            font-size: 14px;
-            border-top: 1px solid #eee;
-            padding-top: 20px;
-        }}
-        
         @media (max-width: 600px) {{
             .container {{
                 padding: 25px;
             }}
-            
             h1 {{
                 font-size: 24px;
             }}
-            
             .emoji {{
                 font-size: 60px;
             }}
-            
             .features {{
                 grid-template-columns: 1fr;
-            }}
-            
-            .button-group {{
-                flex-direction: column;
-            }}
-            
-            button {{
-                width: 100%;
             }}
         }}
     </style>
@@ -440,45 +322,33 @@ class FOSTASCore:
     <div class="container">
         <span class="emoji">{emoji}</span>
         <h1>FOSTAS AI Studio</h1>
-        <p class="subtitle">🚀 Yapay Zeka Tarafından Oluşturulan Uygulamaya Hoş Geldin!</p>
+        <p class="subtitle">🚀 Yapay Zeka ile Oluşturuldu</p>
         
         <div class="info">
             <p><strong>📌 Başlık:</strong> {title}</p>
-            <p>Bu uygulama FOSTAS OS'un Multi-Agent AI sistemi tarafından otomatik olarak tasarlanmış ve kodlanmıştır.</p>
+            <p>Bu uygulama FOSTAS OS tarafından otomatik olarak tasarlanmıştır.</p>
         </div>
         
         <div class="features">
             <div class="feature">
                 <div class="feature-icon">⚡</div>
                 <div class="feature-title">Hızlı</div>
-                <div class="feature-desc">Anında yükleniyor</div>
             </div>
             <div class="feature">
                 <div class="feature-icon">📱</div>
                 <div class="feature-title">Responsive</div>
-                <div class="feature-desc">Her cihazda mükemmel</div>
             </div>
             <div class="feature">
                 <div class="feature-icon">🎨</div>
                 <div class="feature-title">Modern</div>
-                <div class="feature-desc">Güzel tasarım</div>
             </div>
             <div class="feature">
                 <div class="feature-icon">🔧</div>
                 <div class="feature-title">Esnek</div>
-                <div class="feature-desc">Kolayca özelleştirilebilir</div>
             </div>
         </div>
         
-        <div class="button-group">
-            <button onclick="alert('FOSTAS AI tarafından oluşturuldu! ✨')">🎮 Başla</button>
-            <button class="secondary" onclick="location.reload()">🔄 Yenile</button>
-        </div>
-        
-        <footer>
-            <p>🤖 FOSTAS Multi-Agent AI System</p>
-            <p>Nemotron • DeepSeek • GLM-5.2 • GPT-OSS • Llama 3.3</p>
-        </footer>
+        <button onclick="alert('FOSTAS tarafından oluşturuldu!')">🎮 Başla</button>
     </div>
 </body>
 </html>"""
@@ -489,7 +359,6 @@ class FOSTASCore:
         interactivity_script = """
 <script>
 window.addEventListener('load', function() {
-    // Auto-button handler
     document.querySelectorAll('button').forEach(btn => {
         if (!btn.hasAttribute('onclick') && !btn.onclick) {
             btn.addEventListener('click', function() {
@@ -517,8 +386,7 @@ window.addEventListener('load', function() {
         }
     });
     
-    // Drag-drop for images/assets
-    document.querySelectorAll('img, [data-draggable="true"]').forEach(el => {
+    document.querySelectorAll('img, [data-draggable="true"], svg').forEach(el => {
         el.style.cursor = 'grab';
         let isDragging = false;
         let offset = { x: 0, y: 0 };
@@ -566,28 +434,26 @@ window.addEventListener('load', function() {
 
     def generate_app(self, user_prompt: str) -> bool:
         """
-        Main app generation pipeline with AUTO IMAGE DOWNLOAD
+        Main app generation pipeline
         """
         
         self.generation_log = []
         doc_context = self.project_memory["docs"] if self.project_memory["docs"] else "None"
         
         # ============ STAGE 1: NEMOTRON (Architect) ============
-        self._log_step("🧠 Nemotron", "Planning architecture...")
+        self._log_step("🧠 Nemotron", "Mimarlık planlıyor...")
         
-        nemotron_prompt = f"""You are a legendary UX/UI Architect. Create a detailed plan for this:
+        nemotron_prompt = f"""Kullanıcı istediği: "{user_prompt}"
+Bağlam: "{doc_context}"
 
-REQUEST: "{user_prompt}"
-CONTEXT: "{doc_context}"
+Lütfen detaylı plan yap:
+1. App türü (oyun, website, tool, vb.)
+2. Ana özellikler (3-5 madde)
+3. Görsel stil (modern, retro, minimalist, vb.)
+4. Kilit interaksiyonlar
+5. Hangi SVG/Emoji grafikler lazım?
 
-Provide:
-1. App type (game, website, tool, etc.)
-2. Main features (3-5 bullets)
-3. Visual style (modern, retro, minimalist, etc.)
-4. Key interactions
-5. What images/visuals are needed?
-
-Be specific. No markdown."""
+Markdown kullanma."""
 
         app_plan = self._nvidia_chat(
             "nemotron",
@@ -599,7 +465,7 @@ Be specific. No markdown."""
         )
         
         if "ERROR" in app_plan or len(app_plan) < 100:
-            self._log_step("⚠️ Nemotron", "Backup to Llama...")
+            self._log_step("⚠️ Nemotron", "Llama'ya geçiş...")
             app_plan = self._nvidia_chat(
                 "llama",
                 "meta/llama-3.3-70b-instruct",
@@ -608,23 +474,21 @@ Be specific. No markdown."""
                 temperature=0.5
             )
         
-        self._log_step("✅ Nemotron", "Plan ready")
+        self._log_step("✅ Nemotron", "Plan hazır")
 
         # ============ STAGE 2: DEEPSEEK (Engineer) ============
-        self._log_step("⚙️ DeepSeek", "Writing technical specs...")
+        self._log_step("⚙️ DeepSeek", "Teknik spesifikasyon yazıyor...")
         
-        deepseek_prompt = f"""You are a Senior Frontend Architect.
+        deepseek_prompt = f"""Plan: {app_plan}
 
-PLAN: {app_plan}
+Lütfen teknik spesifikasyon yaz:
+1. HTML yapısı (ana sections)
+2. CSS yaklaşımı (layout, animasyonlar, responsive)
+3. Lazım olan JavaScript functions
+4. SVG şekilleri neler olmalı?
+5. Emoji kullanılabilir mi?
 
-Write detailed technical specification:
-1. HTML structure (main sections/elements)
-2. CSS approach (layout, animations, responsive design)
-3. JavaScript functions needed
-4. What image URLs should be used? (describe what images needed)
-5. Canvas/WebGL if game
-
-Be technical. Output specifications only, no code yet. No markdown."""
+Markdown kullanma."""
 
         tech_spec = self._nvidia_chat(
             "deepseek",
@@ -638,42 +502,47 @@ Be technical. Output specifications only, no code yet. No markdown."""
         if "ERROR" in tech_spec or len(tech_spec) < 100:
             tech_spec = app_plan
         
-        self._log_step("✅ DeepSeek", "Specs complete")
+        self._log_step("✅ DeepSeek", "Spesifikasyon hazır")
 
         # ============ STAGE 3: GLM-5.2 (Master Coder) ============
-        self._log_step("💻 GLM-5.2", "Writing code + Finding images...")
+        self._log_step("💻 GLM-5.2", "Kod ve grafikler yazıyor...")
         
         asset_info = ""
         if self.project_memory["assets"]:
             asset_name = self.project_memory["assets"][0]["name"]
-            asset_info = f"\nUSER HAS UPLOADED: {asset_name}\nInclude it as {{{{USER_IMAGE}}}} placeholder in src attributes."
+            asset_info = f"\nKullanıcı '{asset_name}' adında resim yükledi. Bunu {{{{USER_IMAGE}}}} olarak kodda kullan."
         
-        glm_prompt = f"""You are the world's best web developer. Write a SINGLE complete HTML file.
+        glm_prompt = f"""Dünyanın en iyi web geliştiricisisin. TEK bir HTML dosyası yaz.
 
-REQUEST: "{user_prompt}"
-PLAN: {app_plan}
-SPECS: {tech_spec}
+İstek: "{user_prompt}"
+Plan: {app_plan}
+Spesifikasyon: {tech_spec}
 {asset_info}
 
-CRITICAL RULES:
-1. Start with <!DOCTYPE html>
-2. Include all HTML, CSS, JavaScript in ONE file
-3. Responsive design (mobile-first)
-4. ALL buttons use onclick="functionName()" - NO addEventListener
-5. All JavaScript functions are GLOBAL: window.functionName = function() {{ }}
-6. If game: use HTML5 Canvas or simple DOM manipulation
-7. **CRITICAL: For every image needed, write: src="https://SEARCH_TERM.jpg"**
-   Examples:
-   - For car game: src="https://pixabay.com/images/car-racing-game.jpg"
-   - For museum: src="https://commons.wikimedia.org/wiki/Egyptian_Museum.jpg"
-   - Use FREE image sources: pixabay.com, unsplash.com, pexels.com, commons.wikimedia.org
-8. NO external CSS/JS files (all inline)
-9. Modern gradient backgrounds, smooth animations
-10. Make it visually stunning
+KURALLLAR (ÇOK ÖNEMLİ):
+1. <!DOCTYPE html> ile başla
+2. Tüm HTML, CSS, JavaScript tek dosyada
+3. Responsive (mobile-first)
+4. TÜM button'lar onclick="..." kullan, addEventListener KULLANMA
+5. Tüm JS functions GLOBAL olsun (window.func = function() {{}})
+6. Oyunsa: Canvas veya DOM manipulation kullan
+7. **SVG graphics inline yaz** - gerçek resim indirme YAPMA
+8. **Çok Emoji kullan!** 🎮🎯🎨🚀⭐
+9. CSS gradients ve smooth animasyonlar
+10. Hiç external link yok, tümü inline
 
-**IMPORTANT: Write FULL URLs for images so they can be downloaded automatically!**
+ÖRNEK SVG (araba oyunu için):
+```javascript
+function createCarSVG() {{
+    return `<svg viewBox="0 0 100 50">
+        <rect x="10" y="15" width="80" height="20" fill="#FF4B4B"/>
+        <circle cx="25" cy="35" r="8" fill="#333"/>
+        <circle cx="75" cy="35" r="8" fill="#333"/>
+    </svg>`;
+}}
+```
 
-OUTPUT ONLY RAW HTML. NO MARKDOWN. START WITH <!DOCTYPE html>"""
+SADECEhtml KOD, MARKDOWN YOKTUR. <!DOCTYPE html> İLE BAŞLA!"""
 
         code = self._nvidia_chat(
             "glm",
@@ -685,7 +554,7 @@ OUTPUT ONLY RAW HTML. NO MARKDOWN. START WITH <!DOCTYPE html>"""
         
         # Fallback 1: DeepSeek
         if "ERROR" in code or len(code) < 300 or "<!DOCTYPE" not in code:
-            self._log_step("⚠️ GLM-5.2", "Backup to DeepSeek...")
+            self._log_step("⚠️ GLM-5.2", "DeepSeek'e geçiş...")
             code = self._nvidia_chat(
                 "deepseek",
                 "deepseek-ai/deepseek-v4-pro",
@@ -697,7 +566,7 @@ OUTPUT ONLY RAW HTML. NO MARKDOWN. START WITH <!DOCTYPE html>"""
         
         # Fallback 2: Llama
         if "ERROR" in code or len(code) < 300 or "<!DOCTYPE" not in code:
-            self._log_step("⚠️ DeepSeek", "Backup to Llama...")
+            self._log_step("⚠️ DeepSeek", "Llama'ya geçiş...")
             code = self._nvidia_chat(
                 "llama",
                 "meta/llama-3.3-70b-instruct",
@@ -706,32 +575,27 @@ OUTPUT ONLY RAW HTML. NO MARKDOWN. START WITH <!DOCTYPE html>"""
                 temperature=0.7
             )
         
-        self._log_step("✅ GLM-5.2", "Code generated")
-
-        # ============ AUTO IMAGE DOWNLOAD ============
-        self._log_step("🖼️ Image Downloader", "Downloading images from web...")
-        code = self._extract_and_download_images(code)
-        self._log_step("✅ Image Downloader", "Images embedded")
+        self._log_step("✅ GLM-5.2", "Kod yazıldı")
 
         # ============ STAGE 4: GPT-OSS (QA Inspector) ============
         if "<!DOCTYPE" in code or "<html" in code:
-            self._log_step("🔍 GPT-OSS", "Quality assurance...")
+            self._log_step("🔍 GPT-OSS", "Kalite kontrol yapıyor...")
             
             code_sample = code[:4000]
-            qa_prompt = f"""You are a QA Engineer. Review this HTML code:
+            qa_prompt = f"""Bu HTML kodunu kontrol et:
 
-CODE:
 {code_sample}
 
-Check for:
-1. <!DOCTYPE html> present?
-2. All buttons have onclick (no addEventListener)?
-3. Global JS functions (not nested)?
-4. Images are embedded as data URIs?
-5. Valid HTML structure?
-6. Mobile responsive?
+Kontrol et:
+1. <!DOCTYPE html> var mı?
+2. Button'lar onclick kullanıyor mu?
+3. JS functions global mi?
+4. SVG grafikleri düzgün mü?
+5. HTML valid mi?
+6. Mobile responsive mi?
 
-Fix critical issues. Output ONLY the fixed HTML, no explanation. Keep all original content."""
+Sorun bulursan düzelt. SADECE HTML kodu ver, başka birşey yok.
+"""
 
             reviewed = self._nvidia_chat(
                 "gpt_oss",
@@ -744,7 +608,7 @@ Fix critical issues. Output ONLY the fixed HTML, no explanation. Keep all origin
             if ("<!DOCTYPE" in reviewed or "<html" in reviewed) and len(reviewed) > 300:
                 code = reviewed
             
-            self._log_step("✅ GPT-OSS", "QA passed")
+            self._log_step("✅ GPT-OSS", "QA geçti")
 
         # ============ FINAL PROCESSING ============
         code = self._clean_html(code)
@@ -752,16 +616,16 @@ Fix critical issues. Output ONLY the fixed HTML, no explanation. Keep all origin
         # Inject user assets
         if self.project_memory["assets"]:
             code = self._inject_user_asset(code)
-            self._log_step("✅ System", "Assets injected")
+            self._log_step("✅ System", "Kullanıcı resmi eklendi")
         
         # Add interactivity layer
         if "<!DOCTYPE" in code or "<html" in code:
             code = self._add_interactivity_layer(code)
             self.raw_game_html = code
-            self._log_step("✅ System", "Interactivity layer added")
+            self._log_step("✅ System", "Uygulama tamamlandı")
             return True
         
         # Ultimate fallback
-        self._log_step("⚠️ System", "Using fallback template...")
+        self._log_step("⚠️ System", "Fallback template kullanılıyor...")
         self.raw_game_html = self._create_fallback_html(user_prompt)
         return True
