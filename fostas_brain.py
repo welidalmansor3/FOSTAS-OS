@@ -2,18 +2,21 @@ import os
 import re
 import base64
 import time
+import requests
+from io import BytesIO
 from openai import OpenAI
 from dotenv import load_dotenv
+from PIL import Image
 
 load_dotenv()
 
 
 class FOSTASCore:
     """
-    FOSTAS: Multi-Agent AI App Studio
+    FOSTAS: Multi-Agent AI App Studio with Auto Image Download
     - Nemotron: UX/UI Architect (Plans the app/game)
     - DeepSeek: Technical Architect (Specs)
-    - GLM-5.2: Code Master (Writes HTML/JS/Canvas)
+    - GLM-5.2: Code Master (Writes HTML/JS/Canvas + Finds Images)
     - GPT-OSS: QA Inspector (Tests code)
     - Llama 3.3: Fallback Engine (Emergency backup)
     """
@@ -23,7 +26,8 @@ class FOSTASCore:
         self.project_memory = {
             "assets": [],  # User uploaded images/files
             "docs": "",    # User uploaded documents
-            "app_type": None  # "game" or "website"
+            "app_type": None,  # "game" or "website"
+            "downloaded_images": []  # Downloaded from web
         }
         
         # Initialize NVIDIA API clients
@@ -38,7 +42,7 @@ class FOSTASCore:
         self.nv_base_url = "https://integrate.api.nvidia.com/v1"
         self.clients = {}
         self.status = {}
-        self.generation_log = []  # For UI progress updates
+        self.generation_log = []
 
         # Initialize all clients
         for model_name, key in self.nv_keys.items():
@@ -62,9 +66,7 @@ class FOSTASCore:
     def _nvidia_chat(self, model_client: str, model_name: str, prompt: str, 
                      max_tokens: int = 4096, temperature: float = 0.7, 
                      extra_body: dict = None) -> str:
-        """
-        Call NVIDIA API via OpenAI SDK
-        """
+        """Call NVIDIA API via OpenAI SDK"""
         if model_client not in self.clients:
             return f"ERROR: {model_client} client not initialized"
         
@@ -85,6 +87,63 @@ class FOSTASCore:
         except Exception as e:
             return f"ERROR: {str(e)}"
 
+    def _download_image_from_web(self, image_url: str, timeout=5) -> str:
+        """
+        Download image from URL and convert to base64 data URI
+        Returns: data:image/...;base64,... or empty string if failed
+        """
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(image_url, headers=headers, timeout=timeout)
+            response.raise_for_status()
+            
+            # Detect image type
+            content_type = response.headers.get('content-type', 'image/jpeg')
+            if 'png' in content_type:
+                mime_type = 'image/png'
+            elif 'gif' in content_type:
+                mime_type = 'image/gif'
+            elif 'webp' in content_type:
+                mime_type = 'image/webp'
+            else:
+                mime_type = 'image/jpeg'
+            
+            # Convert to base64
+            img_base64 = base64.b64encode(response.content).decode('utf-8')
+            data_uri = f"data:{mime_type};base64,{img_base64}"
+            
+            self._log_step("🖼️ Image Downloader", f"Downloaded: {image_url[:50]}...")
+            return data_uri
+            
+        except Exception as e:
+            self._log_step("⚠️ Image Downloader", f"Failed to download: {str(e)[:50]}")
+            return ""
+
+    def _extract_and_download_images(self, html_code: str) -> str:
+        """
+        Find image URLs in HTML and download them, replace with data URIs
+        """
+        # Find all src="..." patterns
+        img_pattern = r'src=["\']([^"\']+)["\']'
+        urls = re.findall(img_pattern, html_code)
+        
+        for url in urls:
+            # Skip data URIs and relative paths
+            if url.startswith('data:') or url.startswith('/') or url.startswith('#'):
+                continue
+            
+            # Try to download
+            if url.startswith('http'):
+                data_uri = self._download_image_from_web(url)
+                if data_uri:
+                    # Replace URL with data URI
+                    html_code = html_code.replace(f'src="{url}"', f'src="{data_uri}"')
+                    html_code = html_code.replace(f"src='{url}'", f"src='{data_uri}'")
+        
+        return html_code
+
     def upload_document(self, text: str):
         """Store user uploaded document"""
         self.project_memory["docs"] = text[:5000]
@@ -95,7 +154,6 @@ class FOSTASCore:
         safe_name = filename.replace(" ", "_")
         encoded_data = base64.b64encode(file_data).decode('utf-8')
         
-        # Check if asset already exists
         existing = next((a for a in self.project_memory["assets"] if a["name"] == safe_name), None)
         if existing:
             existing["data"] = file_data
@@ -129,7 +187,6 @@ class FOSTASCore:
     def _clean_html(self, code: str) -> str:
         """Remove markdown formatting from HTML code"""
         code = code.strip()
-        # Remove markdown code fences
         code = re.sub(r"^```(html|javascript|js)?\n?", "", code)
         code = re.sub(r"\n?```$", "", code)
         code = re.sub(r"```", "", code)
@@ -140,12 +197,11 @@ class FOSTASCore:
         if not self.project_memory["assets"]:
             return code
         
-        asset = self.project_memory["assets"][0]  # Use first asset
+        asset = self.project_memory["assets"][0]
         b64 = asset["b64"]
         mime = asset["mime"]
         data_uri = f"data:{mime};base64,{b64}"
         
-        # Replace common placeholders
         code = code.replace("{{USER_IMAGE}}", data_uri)
         code = code.replace("{{ASSET}}", data_uri)
         code = code.replace("USER_ASSET", data_uri)
@@ -153,7 +209,6 @@ class FOSTASCore:
         code = code.replace("PLACEHOLDER_IMAGE", data_uri)
         code = code.replace("{{PLACEHOLDER}}", data_uri)
         
-        # Also inject as inline SVG or direct src if it's an image
         if mime.startswith("image/"):
             code = re.sub(r'src=["\']USER_[^"\']*["\']', f'src="{data_uri}"', code)
             code = re.sub(r'src=["\']ASSET["\']', f'src="{data_uri}"', code)
@@ -177,7 +232,6 @@ class FOSTASCore:
             "blog": "📝",
             "chat": "💬",
             "app": "📱",
-            "aplikasi": "📱",
         }
         
         emoji = "📱"
@@ -439,7 +493,6 @@ window.addEventListener('load', function() {
     document.querySelectorAll('button').forEach(btn => {
         if (!btn.hasAttribute('onclick') && !btn.onclick) {
             btn.addEventListener('click', function() {
-                // Try common game/app start functions
                 const startFunctions = [
                     'startApp', 'initGame', 'startGame', 'beginApp', 'init',
                     'start', 'play', 'launch', 'begin', 'run', 'execute'
@@ -451,7 +504,6 @@ window.addEventListener('load', function() {
                     }
                 });
                 
-                // Hide start screens
                 const startScreens = document.querySelectorAll('[id*="start"], [id*="menu"], [id*="screen"]');
                 startScreens.forEach(el => {
                     if (el.style.display !== 'flex' && el.style.display !== 'grid') {
@@ -459,7 +511,6 @@ window.addEventListener('load', function() {
                     }
                 });
                 
-                // Show main content
                 const mainContent = document.querySelectorAll('[id*="main"], [id*="game"], [id*="app"], [id*="content"]');
                 mainContent.forEach(el => el.style.display = 'block');
             });
@@ -515,12 +566,7 @@ window.addEventListener('load', function() {
 
     def generate_app(self, user_prompt: str) -> bool:
         """
-        Main app generation pipeline:
-        1. Nemotron: Architect (plans)
-        2. DeepSeek: Engineer (specs)
-        3. GLM-5.2: Coder (writes code)
-        4. GPT-OSS: QA (reviews)
-        5. Llama: Backup (if needed)
+        Main app generation pipeline with AUTO IMAGE DOWNLOAD
         """
         
         self.generation_log = []
@@ -539,6 +585,7 @@ Provide:
 2. Main features (3-5 bullets)
 3. Visual style (modern, retro, minimalist, etc.)
 4. Key interactions
+5. What images/visuals are needed?
 
 Be specific. No markdown."""
 
@@ -574,7 +621,8 @@ Write detailed technical specification:
 1. HTML structure (main sections/elements)
 2. CSS approach (layout, animations, responsive design)
 3. JavaScript functions needed
-4. Canvas/WebGL if game
+4. What image URLs should be used? (describe what images needed)
+5. Canvas/WebGL if game
 
 Be technical. Output specifications only, no code yet. No markdown."""
 
@@ -588,12 +636,12 @@ Be technical. Output specifications only, no code yet. No markdown."""
         )
         
         if "ERROR" in tech_spec or len(tech_spec) < 100:
-            tech_spec = app_plan  # Fallback
+            tech_spec = app_plan
         
         self._log_step("✅ DeepSeek", "Specs complete")
 
         # ============ STAGE 3: GLM-5.2 (Master Coder) ============
-        self._log_step("💻 GLM-5.2", "Writing code...")
+        self._log_step("💻 GLM-5.2", "Writing code + Finding images...")
         
         asset_info = ""
         if self.project_memory["assets"]:
@@ -614,10 +662,16 @@ CRITICAL RULES:
 4. ALL buttons use onclick="functionName()" - NO addEventListener
 5. All JavaScript functions are GLOBAL: window.functionName = function() {{ }}
 6. If game: use HTML5 Canvas or simple DOM manipulation
-7. Images: use data URIs or placeholder {{{{USER_IMAGE}}}}
-8. NO external scripts or CDN calls (Irak VPN issues)
+7. **CRITICAL: For every image needed, write: src="https://SEARCH_TERM.jpg"**
+   Examples:
+   - For car game: src="https://pixabay.com/images/car-racing-game.jpg"
+   - For museum: src="https://commons.wikimedia.org/wiki/Egyptian_Museum.jpg"
+   - Use FREE image sources: pixabay.com, unsplash.com, pexels.com, commons.wikimedia.org
+8. NO external CSS/JS files (all inline)
 9. Modern gradient backgrounds, smooth animations
 10. Make it visually stunning
+
+**IMPORTANT: Write FULL URLs for images so they can be downloaded automatically!**
 
 OUTPUT ONLY RAW HTML. NO MARKDOWN. START WITH <!DOCTYPE html>"""
 
@@ -654,11 +708,16 @@ OUTPUT ONLY RAW HTML. NO MARKDOWN. START WITH <!DOCTYPE html>"""
         
         self._log_step("✅ GLM-5.2", "Code generated")
 
+        # ============ AUTO IMAGE DOWNLOAD ============
+        self._log_step("🖼️ Image Downloader", "Downloading images from web...")
+        code = self._extract_and_download_images(code)
+        self._log_step("✅ Image Downloader", "Images embedded")
+
         # ============ STAGE 4: GPT-OSS (QA Inspector) ============
         if "<!DOCTYPE" in code or "<html" in code:
             self._log_step("🔍 GPT-OSS", "Quality assurance...")
             
-            code_sample = code[:4000]  # First 4k chars for review
+            code_sample = code[:4000]
             qa_prompt = f"""You are a QA Engineer. Review this HTML code:
 
 CODE:
@@ -668,7 +727,7 @@ Check for:
 1. <!DOCTYPE html> present?
 2. All buttons have onclick (no addEventListener)?
 3. Global JS functions (not nested)?
-4. No broken image tags?
+4. Images are embedded as data URIs?
 5. Valid HTML structure?
 6. Mobile responsive?
 
