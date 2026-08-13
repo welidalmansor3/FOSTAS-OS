@@ -191,20 +191,25 @@ class FOSTASCore:
         })
 
     def _nvidia_chat(self, model_client: str, model_name: str, prompt: str, 
-                     max_tokens: int = 2048, temperature: float = 0.7) -> str:
+                     max_tokens: int = 2048, temperature: float = 0.7, 
+                     extra_body: dict = None) -> str:
         """NVIDIA API call"""
         if model_client not in self.clients:
             return f"ERROR: {model_client} not initialized"
         
         client = self.clients[model_client]
         try:
-            completion = client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=False
-            )
+            kwargs = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False
+            }
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+            
+            completion = client.chat.completions.create(**kwargs)
             return completion.choices[0].message.content
         except Exception as e:
             return f"ERROR: {str(e)}"
