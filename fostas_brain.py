@@ -84,7 +84,10 @@ class FOSTASCore:
             )
             return completion.choices[0].message.content
         except Exception as e:
-            return f"ERROR: {str(e)}"
+            error_msg = f"ERROR: {str(e)}"
+            print(f"🔴 GLM ERROR: {error_msg}")
+            print(f"📝 Prompt length: {len(prompt)}")
+            return error_msg
 
     def _clean_html(self, code: str) -> str:
         """HTML temizle"""
