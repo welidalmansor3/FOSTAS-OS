@@ -200,14 +200,40 @@ Lütfen 3-5 arama terimi yaz (virgüllerle ayrılmış):
 Mevcut fotoğraf linkler ({len(image_list)} adet):
 {images_json}
 
-TEK bir HTML dosyası yaz:
+TEK bir HTML dosyası yaz (SPA - Single Page App):
+
+KURALLAR:
 1. <!DOCTYPE html> ile başla
-2. Responsive design (mobile-first)
-3. Modern CSS (gradients, smooth animations)
-4. Fotoğrafları <img src="[LINK]"> ile koy
-5. Professional ve güzel görünsün
-6. TÜM button'lar onclick="..." kullansın
-7. Hiç external link yok, her şey inline
+2. SADECE HTML, CSS, JavaScript - başka dil YOKTUR
+3. Tüm bölümler (Anasayfa, Hakkında, Hizmetler, Ekip, İletişim, vb.) tek sayfada olsun
+4. JavaScript ile menü butonlarına tıklandığında bölümleri gizle/göster (display: none/block)
+5. Responsive design (mobile-first)
+6. Modern CSS (gradients, animations, transitions)
+7. Fotoğrafları <img src="[LINK]"> ile koy
+8. Professional ve güzel görünsün
+9. TÜM button'lar onclick="..." kullansın (addEventListener KULLANMA)
+10. Tüm JavaScript fonksiyonları GLOBAL olsun
+11. Hiç external link yok, her şey inline
+12. Header/Navigation menüsü tüm sayfada kalıcı olsun
+13. Hamburger menü mobile'da açıl/kapat olsun
+
+YAPISI:
+- Header (Navigation menü - Anasayfa, Hakkında, Hizmetler, Ekip, İletişim, Kontak)
+- Main Container (tüm sayfaları içeren divler)
+- Footer
+
+CSS'de:
+.section {{ display: none; }}
+.section.active {{ display: block; }}
+
+JavaScript'de:
+function showSection(id) {{
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+}}
+
+HTML butonlarda:
+<button onclick="showSection('hakkimizda')">Hakkımızda</button>
 
 SADECE HTML KOD! MARKDOWN YOKTUR!
 <!DOCTYPE html> ile başla!"""
