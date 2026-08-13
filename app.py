@@ -1,41 +1,32 @@
-import os
 import streamlit as st
 import streamlit.components.v1 as components
 from pypdf import PdfReader
 import docx
+import json
 
 from fostas_brain import FOSTASCore
 
 # ============ PAGE CONFIG ============
 st.set_page_config(
-    page_title="FOSTAS OS - AI App Studio",
-    page_icon="📱",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="FOSTAS - Web & Mobile Apps",
+    page_icon="🌐",
+    layout="wide"
 )
 
-# ============ DARK THEME STYLING ============
+# ============ DARK THEME ============
 st.markdown("""
 <style>
     :root {
         --primary: #667eea;
         --primary-dark: #764ba2;
-        --accent: #ff4b4b;
         --bg-dark: #050505;
         --bg-card: #111111;
         --text-primary: #ffffff;
-        --text-secondary: #cccccc;
-        --success: #4caf50;
-        --warning: #ff9800;
     }
     
     .stApp {
         background-color: var(--bg-dark);
         color: var(--text-primary);
-    }
-    
-    .stChatInput, .stChatInputContainer, [data-testid="stChatInput"] {
-        background-color: var(--bg-dark) !important;
     }
     
     .stChatInput textarea {
@@ -50,7 +41,7 @@ st.markdown("""
         border: 1px solid #333333;
     }
     
-    h1, h2, h3, h4, h5, h6 {
+    h1, h2, h3 {
         background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -63,305 +54,163 @@ st.markdown("""
         border: none;
         border-radius: 8px;
         font-weight: bold;
-        transition: all 0.3s;
     }
     
     .stButton button:hover {
         box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
-        transform: translateY(-2px);
-    }
-    
-    .stDownloadButton button {
-        background-color: var(--bg-card);
-        color: white;
-        border: 1px solid var(--primary);
-        border-radius: 8px;
-        transition: all 0.3s;
-    }
-    
-    .stDownloadButton button:hover {
-        background-color: var(--primary);
-        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
-    }
-    
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
     }
     
     .stTabs [data-baseweb="tab"] {
         background-color: var(--bg-card);
-        border-radius: 8px 8px 0px 0px;
-        padding: 10px 20px;
-        color: var(--text-secondary);
     }
     
     .stTabs [aria-selected="true"] {
         background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%) !important;
-        color: white !important;
-    }
-    
-    .status-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: bold;
-    }
-    
-    .status-ok {
-        background-color: #4caf50;
-        color: white;
-    }
-    
-    .status-error {
-        background-color: #ff4b4b;
-        color: white;
-    }
-    
-    .agent-log {
-        background-color: var(--bg-card);
-        border-left: 3px solid var(--primary);
-        padding: 15px;
-        border-radius: 8px;
-        margin: 10px 0;
-        font-size: 14px;
-    }
-    
-    .warning-box {
-        background-color: #ff9800;
-        color: white;
-        padding: 15px;
-        border-radius: 8px;
-        margin: 15px 0;
-    }
-    
-    .success-box {
-        background-color: #4caf50;
-        color: white;
-        padding: 15px;
-        border-radius: 8px;
-        margin: 15px 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ============ SESSION STATE INIT ============
+# ============ SESSION STATE ============
 if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
 
 if 'messages' not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
-        "content": "👋 Kanka hoş geldin! FOSTAS Multi-Agent AI Studio'ya.\n\n🎮 **Oyun** yap: 'Bana 2D araba yarışı oyunu yap'\n🌐 **Web sitesi** yap: 'Bana Irak Müzeleri rehberi web uygulaması yap'\n📱 **App** yap: 'Bana restoran menüsü uygulaması yap'\n\nNe istersen söyle, anında yapayım!"
+        "content": "👋 Hoş geldin! FOSTAS v8'e.\n\n🌐 **Bağlı Yapyzekalar:**\n1. Nemotron (Plan)\n2. DeepSeek (Araştırma)\n3. Image Search Agent (Fotoğraf linki)\n4. GLM-5.2 (Kod)\n5. GPT-OSS (QA)\n6. Llama (Fallback)\n\n✨ **Prompt yaz:**\n'Bana müze web sitesi yap' → Otomatik fotoğraf linki ara + HTML üret!"
     }]
 
-if 'generation_in_progress' not in st.session_state:
-    st.session_state.generation_in_progress = False
+if 'generating' not in st.session_state:
+    st.session_state.generating = False
 
 fostas = st.session_state.fostas
 
-# ============ FILE READERS ============
-def read_uploaded_file(uploaded_file):
-    """Read PDF, DOCX, or TXT files"""
-    if uploaded_file.type == "application/pdf":
-        reader = PdfReader(uploaded_file)
-        return "".join([page.extract_text() for page in reader.pages])
-    elif uploaded_file.name.endswith(".docx"):
-        doc = docx.Document(uploaded_file)
-        return "\n".join([para.text for para in doc.paragraphs])
-    else:
-        return uploaded_file.read().decode("utf-8")
-
 # ============ SIDEBAR ============
 with st.sidebar:
-    st.header("📁 FOSTAS Workspace")
+    st.header("⚙️ FOSTAS Engine")
     
-    # Model Status
-    st.subheader("🔌 AI Engine Status")
-    status = fostas.status
-    engine_map = {
+    st.subheader("🤖 Yapyzekalar")
+    models = {
         "🧠 Nemotron": "nemotron",
-        "⚙️ DeepSeek": "deepseek",
+        "📚 DeepSeek": "deepseek",
         "💻 GLM-5.2": "glm",
         "🔍 GPT-OSS": "gpt_oss",
-        "🦙 Llama 3.3": "llama",
+        "🦙 Llama": "llama",
     }
     
-    for engine_name, key in engine_map.items():
-        info = status.get(key, {"ok": False, "error": "Tanımlı değil"})
-        color = "#4caf50" if info["ok"] else "#ff4b4b"
-        text = "✅ Bağlı" if info["ok"] else "❌ Eksik"
-        st.markdown(f"<span style='color:{color};font-weight:bold'>{text}</span> {engine_name}", unsafe_allow_html=True)
+    for name, key in models.items():
+        info = fostas.status.get(key, {"ok": False})
+        status = "✅" if info["ok"] else "❌"
+        st.write(f"{status} {name}")
     
     st.markdown("---")
-    
-    # Asset Upload
-    st.subheader("📥 Logo / Resim Yükle")
-    st.caption("Uygulamada kullanmak için PNG/JPG yükle")
-    uploaded_asset = st.file_uploader("Dosya Seç", type=["png", "jpg", "jpeg", "gif", "svg", "webp"], key="asset_uploader")
-    
-    if uploaded_asset is not None:
-        fostas.register_user_asset(uploaded_asset.name, uploaded_asset.getvalue())
-        st.success(f"✅ Yüklendi: {uploaded_asset.name}")
-        st.rerun()
-    
-    st.markdown("---")
-    
-    # Asset Manager
-    st.subheader("📦 Yüklü Dosyalar")
-    if fostas.project_memory["assets"]:
-        for asset in fostas.project_memory["assets"]:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.write(f"📄 {asset['name']}")
-            with col2:
-                st.download_button(
-                    label="⬇️",
-                    data=asset["data"],
-                    file_name=asset["name"],
-                    key=f"dl_{asset['name']}"
-                )
-    else:
-        st.info("Henüz dosya yok")
+    st.write("📸 **Fotoğraf Kaynağı:** DuckDuckGo, Google, Pexels")
+    st.caption("Otomatik linki ara (indirme değil)")
 
-# ============ MAIN CONTENT ============
-st.title("📱 FOSTAS OS - Multi-Agent AI App Studio")
-st.subheader("🇮🇶 Irak'ın Teknoloji Gücü | Oyun • Web • App")
+# ============ MAIN ============
+st.title("🌐 FOSTAS v8 - Connected AI Apps")
+st.subheader("Yapyzekalar Birbirine Bağlı, Otomatik Fotoğraf Linki")
 
-tab1, tab2, tab3 = st.tabs(["🛠️ Uygulama Üret", "📲 Uygulamayı Dene", "ℹ️ Hakkında"])
+tab1, tab2, tab3 = st.tabs(["🛠️ Uygulama Yap", "👀 Önizle", "📊 Detaylar"])
 
-# ============ TAB 1: APP GENERATION ============
+# ===== TAB 1: CREATE =====
 with tab1:
-    st.header("💭 Fikrinizi Söyleyin")
+    st.header("💭 Uygulamayı Tarif Et")
     
-    # Quick templates
-    st.subheader("🚀 Hızlı Başlangıç Şablonları")
+    st.subheader("🚀 Örnekler")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("🎮 2D Oyun", use_container_width=True):
-            st.session_state.quick_template = "2D Canvas oyunu (araba yarışı, yılan, vs.)"
         if st.button("🏛️ Müze Rehberi", use_container_width=True):
-            st.session_state.quick_template = "Irak Müzeleri rehberi web sitesi"
-        if st.button("💼 Portföy", use_container_width=True):
-            st.session_state.quick_template = "Kişisel portföy / CV web sitesi"
+            st.session_state.template = "Bana Irak müzeleri rehberi web sitesi yap, her müzeye açılış saatleri ve fotoğraflar ekle"
+        if st.button("☕ Kafe Menüsü", use_container_width=True):
+            st.session_state.template = "Bana bir kafe için menü uygulaması yap, içecekler ve yemekler fotoğraflar ile göster"
     
     with col2:
-        if st.button("🍕 Restoran Menüsü", use_container_width=True):
-            st.session_state.quick_template = "Mobil uyumlu restoran menüsü uygulaması"
-        if st.button("🛒 E-Ticaret", use_container_width=True):
-            st.session_state.quick_template = "Basit alışveriş sepeti web uygulaması"
-        if st.button("📱 Custom", use_container_width=True):
-            st.session_state.quick_template = None
+        if st.button("💼 Portföy", use_container_width=True):
+            st.session_state.template = "Bana profesyonel portföy web sitesi yap, proje örnekleri fotoğraflar ile ekle"
+        if st.button("🏨 Otel", use_container_width=True):
+            st.session_state.template = "Bana bir otel web sitesi yap, odaları fotoğraflar ile göster"
     
     with col3:
-        if st.button("🎯 3D Oyun", use_container_width=True):
-            st.session_state.quick_template = "Three.js ile basit 3D oyun"
-        if st.button("📝 Blog", use_container_width=True):
-            st.session_state.quick_template = "Kişisel blog web sitesi"
-        if st.button("🎨 Landing Page", use_container_width=True):
-            st.session_state.quick_template = "Modern landing page"
+        if st.button("🛍️ Mağaza", use_container_width=True):
+            st.session_state.template = "Bana bir ürün satış web sitesi yap, ürünleri fotoğraflar ile ekle"
+        if st.button("📚 Blog", use_container_width=True):
+            st.session_state.template = "Bana kişisel blog web sitesi yap, makaleler başlıkları ve kapak fotoğrafları ile"
     
     st.markdown("---")
     
-    # Document upload
-    with st.expander("📎 Doküman Yükle", expanded=False):
-        st.caption("PDF, DOCX, TXT veya Markdown dosyası yükleyebilirsin")
-        uploaded_doc = st.file_uploader("Dosya Seç", type=["pdf", "docx", "txt", "md"], key="doc_uploader")
-        
-        if uploaded_doc is not None:
-            if st.button("📄 Dökümanı AI'a Okut", key="read_doc"):
-                with st.spinner("Doküman okunuyor..."):
-                    text = read_uploaded_file(uploaded_doc)
-                    fostas.upload_document(text)
-                    st.success(f"✅ Doküman yüklendi ({len(text)} karakter)")
-    
-    st.markdown("---")
-    
-    # Chat interface
+    # Chat
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
-    # Get prompt
+    # Prompt
     prompt = None
     
-    if 'quick_template' in st.session_state and st.session_state.quick_template:
-        prompt = st.session_state.quick_template
-        st.session_state.quick_template = None
+    if 'template' in st.session_state:
+        prompt = st.session_state.template
+        st.session_state.template = None
     else:
-        prompt = st.chat_input("Ne uygulaması yapalım? (Örn: Bana yılan oyunu yap)")
+        prompt = st.chat_input("Uygulamayı tarif et... (Örn: Bana bir fotoğraf galerisi web sitesi yap)")
     
-    # Generate app
-    if prompt and not st.session_state.generation_in_progress:
+    if prompt and not st.session_state.generating:
         st.session_state.messages.append({"role": "user", "content": prompt})
         
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        st.session_state.generation_in_progress = True
+        st.session_state.generating = True
         
         with st.chat_message("assistant"):
-            # Progress area
-            progress_placeholder = st.empty()
-            log_placeholder = st.empty()
+            col1, col2 = st.columns([2, 1])
             
-            with progress_placeholder.container():
-                st.markdown("### 🚀 AI Fabrikası Çalışıyor...")
+            with col1:
+                st.markdown("### 🚀 FOSTAS Fabrikası Çalışıyor...\n")
+            
+            progress_container = st.container()
+            
+            with progress_container:
                 progress_bar = st.progress(0)
-                status_text = st.empty()
+                log_area = st.empty()
             
-            # Clear generation log
-            fostas.generation_log = []
-            
-            # Call generation
+            # Generate
             success = fostas.generate_app(prompt)
             
-            # Update progress
-            stages = [
-                (0.2, "🧠 Nemotron: Architekt Planlıyor..."),
-                (0.4, "⚙️ DeepSeek: Teknik Spesifikasyon Yazıyor..."),
-                (0.6, "💻 GLM-5.2: Kod Yazıyor..."),
-                (0.8, "🔍 GPT-OSS: Kalite Kontrolü Yapıyor..."),
-                (1.0, "✅ Tamamlandı!")
-            ]
+            # Show logs
+            logs = fostas.get_logs()
             
-            for progress_val, stage_text in stages:
-                progress_bar.progress(progress_val)
-                status_text.markdown(f"#### {stage_text}")
-                import time
-                time.sleep(0.3)
+            for i, log in enumerate(logs):
+                progress = (i + 1) / len(logs) if logs else 0
+                progress_bar.progress(progress)
+                
+                log_text = f"{log['agent']} → {log['action']}"
+                with log_area.container():
+                    for l in logs[:i+1]:
+                        st.markdown(f"- {l['agent']}: {l['action']}")
             
-            # Clear progress area
-            progress_placeholder.empty()
+            progress_container.empty()
             
             if success:
-                st.markdown("### ✅ Uygulama Hazır!")
-                st.markdown("👉 **'📲 Uygulamayı Dene'** sekmesine geç ve uygulamayı test et!")
+                st.success("✅ Uygulama Tamamlandı!")
+                st.info("👉 '👀 Önizle' sekmesine geç!")
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": "✅ Uygulama hazır! 👉 'Uygulamayı Dene' sekmesine geç"
+                    "content": "✅ Tamamlandı! Fotoğraflar otomatik internetten linkler alınarak eklendi. '👀 Önizle' sekmesinde görebilirsin."
                 })
             else:
-                st.error("⚠️ Uygulama üretilirken bir sorun oluştu. Lütfen farklı bir prompt dene.")
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": "⚠️ Bir hata oluştu. Lütfen tekrar dene."
-                })
+                st.error("⚠️ Hata oluştu")
         
-        st.session_state.generation_in_progress = False
+        st.session_state.generating = False
         st.rerun()
 
-# ============ TAB 2: APP PREVIEW ============
+# ===== TAB 2: PREVIEW =====
 with tab2:
-    st.header("📲 Uygulamayı Test Et")
+    st.header("👀 Uygulamayı Gör")
     
-    if fostas.raw_game_html:
-        st.write("Aşağıdaki uygulamayı test edebilirsin:")
-        
-        # Preview
-        components.html(fostas.raw_game_html, height=700, scrolling=True)
+    if fostas.raw_html:
+        components.html(fostas.raw_html, height=700, scrolling=True)
         
         st.markdown("---")
         
@@ -369,84 +218,52 @@ with tab2:
         
         with col1:
             st.download_button(
-                label="⬇️ HTML Olarak İndir",
-                data=fostas.raw_game_html.encode('utf-8'),
-                file_name="fostas_uygulamam.html",
+                label="⬇️ HTML İndir",
+                data=fostas.raw_html.encode('utf-8'),
+                file_name="app.html",
                 mime="text/html",
                 use_container_width=True
             )
         
         with col2:
             if st.button("🔄 Yeniden Üret", use_container_width=True):
-                fostas.raw_game_html = ""
+                fostas.raw_html = ""
                 st.rerun()
     else:
-        st.warning("⚠️ Henüz bir uygulama üretilmedi.")
-        st.info("👈 'Uygulama Üret' sekmesine git ve bir fikir yaz!")
+        st.info("Henüz uygulama yok. Sol taraftan bir prompt yaz!")
 
-# ============ TAB 3: ABOUT ============
+# ===== TAB 3: DETAILS =====
 with tab3:
-    st.header("ℹ️ FOSTAS OS Hakkında")
+    st.header("📊 Üretim Detayları")
     
-    st.markdown("""
-    ### 🚀 Multi-Agent AI System
-    
-    FOSTAS OS, **5 yapay zeka modelinin** birlikte çalışarak uygulamalar oluşturan devrimci bir sistemdir.
-    
-    **Ekip Üyeleri:**
-    
-    1. 🧠 **Nemotron** - Başmimar
-       - Kullanıcı fikrini analiz eder
-       - Uygulama mimarisini planlar
-       - Reasoning ile derinlemesine düşünür
-    
-    2. ⚙️ **DeepSeek** - Mühendis
-       - Teknik spesifikasyon hazırlar
-       - HTML/CSS/JS yapısını tasarlar
-       - Algoritmaları belirler
-    
-    3. 💻 **GLM-5.2** - Kodlama Ustası
-       - Hızlı ve verimli kod yazar
-       - Responsive tasarımlar oluşturur
-       - Canvas oyunları yazabilir
-    
-    4. 🔍 **GPT-OSS** - Kalite Kontrol
-       - Kodu gözden geçirir
-       - Hataları düzeltir
-       - Optimizasyonları yapar
-    
-    5. 🦙 **Llama 3.3** - Yedek Güç
-       - Diğer modeller başarısız olursa devreye girer
-       - Sistemi ayakta tutar
-       - Fallback çözümleri sağlar
-    
-    ### 🎯 Yetenekler
-    
-    ✅ **Oyunlar** - 2D/3D Canvas oyunları, interaktif deneyimler
-    ✅ **Web Siteleri** - Portföyler, bloglar, landing pages
-    ✅ **Uygulamalar** - E-ticaret, müze rehberleri, restoran menüleri
-    ✅ **Responsive** - Tüm cihazlarda mükemmel çalışır
-    ✅ **VPN-Free** - Irak'ta çalışır (CDN sorunu yok)
-    ✅ **Hızlı** - Dakikalar içinde tamamlanır
-    
-    ### 🇮🇶 Irak İçin Tasarlandı
-    
-    - VPN/CORS sorunlarına karşı güçlü
-    - Türkçe ve Arapça desteği
-    - Düşük bant genişliği için optimize
-    - Lokal resimleri base64 olarak gömme
-    
-    ### 📱 Nasıl Kullanılır?
-    
-    1. Sol taraftan resim yükle (opsiyonel)
-    2. Aşağıdaki şablonlardan birini seç VEYA kendi fikirni yaz
-    3. AI fabrikası çalışmaya başlar
-    4. Sonuç 20-30 saniye içinde hazır olur
-    5. 'Uygulamayı Dene' sekmesinde test et
-    6. HTML olarak indir ve kullan
-    
-    ---
-    
-    **Yapıcı:** FOSTAS Dev Team 🚀
-    **Teknoloji:** NVIDIA AI Engines + Streamlit
-    """)
+    if fostas.generation_log:
+        st.subheader("📝 İşlem Logları")
+        
+        for log in fostas.generation_log:
+            st.markdown(f"**{log['agent']}**  \n{log['action']}")
+        
+        st.markdown("---")
+        
+        st.subheader("💾 Shared Memory")
+        
+        memory = fostas.get_memory()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Kullanıcı Prompt:**")
+            st.write(memory.get("user_prompt", "")[:100])
+            
+            st.markdown("**Arama Terimleri:**")
+            for term in memory.get("search_queries", [])[:5]:
+                st.write(f"- {term}")
+        
+        with col2:
+            st.markdown("**Bulunan Fotoğraf Linkleri:**")
+            image_links = memory.get("image_links", [])
+            st.write(f"Toplam: {len(image_links)} fotoğraf")
+            
+            for img in image_links[:3]:
+                st.write(f"- {img['title']}")
+    else:
+        st.info("Henüz işlem yapılmadı")
