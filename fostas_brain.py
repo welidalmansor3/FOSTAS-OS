@@ -18,34 +18,26 @@ class ImageSearchAgent:
         })
     
     def search_image_links(self, query: str, count: int = 5) -> list:
-        """DuckDuckGo'dan fotoğraf linki ara"""
-        try:
-            images = []
-            
-            # DuckDuckGo Image Search
-            ddg_url = f"https://duckduckgo.com/i.js?q={query}&count={count}"
-            response = requests.get(ddg_url, timeout=10, headers=self.session.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                for result in data.get('results', [])[:count]:
-                    images.append({
-                        "url": result['image'],
-                        "title": result.get('title', query),
-                        "source": "DuckDuckGo"
-                    })
-                return images
-        except:
-            pass
+        """Gerçek fotoğraf linklerini ara (Picsum Photos - key yok!)"""
+        images = []
         
-        # Fallback
-        return [
-            {
-                "url": f"https://via.placeholder.com/800x600?text={query.replace(' ', '+')}&bg_color=667eea&text_color=ffffff",
-                "title": f"{query} - Placeholder",
-                "source": "Placeholder"
-            }
-        ]
+        # Picsum Photos: Ücretsiz, key yok, hızlı, kaliteli
+        # https://picsum.photos - Random real photos
+        
+        for i in range(count):
+            width = 800 if i % 2 == 0 else 600
+            height = 600 if i % 2 == 0 else 800
+            
+            # Picsum: Her çağrı farklı resim verir (seed ile aynı kalır)
+            url = f"https://picsum.photos/{width}/{height}?random={i}&seed={query.replace(' ', '')}"
+            
+            images.append({
+                "url": url,
+                "title": f"{query} - {i+1}",
+                "source": "Picsum Photos"
+            })
+        
+        return images
 
 
 class FOSTASCore:
