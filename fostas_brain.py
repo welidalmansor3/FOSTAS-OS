@@ -1,32 +1,164 @@
 import os
 import re
-import base64
+import json
 import time
+import requests
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
+class SharedMemory:
+    """Tüm yapyzekalar arasında veri paylaşımı"""
+    def __init__(self):
+        self.data = {
+            "user_prompt": "",
+            "app_type": "",
+            "image_requirements": [],
+            "search_queries": [],
+            "image_links": [],
+            "app_plan": "",
+            "technical_spec": "",
+            "ui_design": "",
+            "final_code": ""
+        }
+    
+    def set(self, key: str, value):
+        self.data[key] = value
+    
+    def get(self, key: str):
+        return self.data.get(key, "")
+    
+    def append(self, key: str, value):
+        if isinstance(self.data[key], list):
+            self.data[key].append(value)
+    
+    def get_all(self) -> dict:
+        return self.data.copy()
+
+
+class ImageSearchAgent:
+    """
+    Bing Image Search ile fotoğraf linki ara (indirme değil, link al)
+    """
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+    
+    def search_image_links(self, query: str, count: int = 5) -> list:
+        """
+        Bing'den fotoğraf linklerini ara (indirme DEĞİL, sadece link)
+        Returns: [{"url": "...", "title": "...", "source": "bing"}, ...]
+        """
+        try:
+            # Bing Image Search (public, key yok)
+            search_url = "https://www.bing.com/images/search"
+            params = {
+                'q': query,
+                'first': 1
+            }
+            
+            # HTML'den URL'leri çıkar
+            images = []
+            
+            # Alternatif: DuckDuckGo Image Search (API'siz)
+            try:
+                ddg_url = f"https://duckduckgo.com/i.js?q={query}&count={count}"
+                response = requests.get(ddg_url, timeout=10, headers=self.session.headers)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    for result in data.get('results', [])[:count]:
+                        images.append({
+                            "url": result['image'],
+                            "title": result.get('title', query),
+                            "source": "DuckDuckGo"
+                        })
+                    return images
+            except:
+                pass
+            
+            # Alternatif: Google Images Unofficial
+            try:
+                # Bazen çalışan, bazen çalışmayan method
+                google_url = f"https://www.google.com/search?q={query}&tbm=isch"
+                response = requests.get(google_url, timeout=10, headers=self.session.headers)
+                
+                # URL pattern çıkar
+                img_urls = re.findall(r'"https?://[^"]+\.jpg"', response.text)
+                for url in img_urls[:count]:
+                    images.append({
+                        "url": url.strip('"'),
+                        "title": query,
+                        "source": "Google Images"
+                    })
+                
+                if images:
+                    return images
+            except:
+                pass
+            
+            # Fallback: Pexels + Pixabay search (API'siz ancak reliable)
+            try:
+                # Pexels public search
+                pexels_url = f"https://www.pexels.com/search/{query}/?page=1"
+                response = requests.get(pexels_url, timeout=10)
+                
+                # img src pattern çıkar
+                img_matches = re.findall(r'<img[^>]*src="([^"]+\.jpg)"', response.text)
+                for url in img_matches[:count]:
+                    if 'images.pexels.com' in url:
+                        images.append({
+                            "url": url,
+                            "title": query,
+                            "source": "Pexels"
+                        })
+                
+                if images:
+                    return images
+            except:
+                pass
+            
+            # Son çare: Placeholder URL'ler
+            if not images:
+                images = [
+                    {
+                        "url": f"https://via.placeholder.com/800x600?text={query.replace(' ', '+')}&bg_color=667eea&text_color=ffffff",
+                        "title": f"{query} - Placeholder",
+                        "source": "Placeholder"
+                    }
+                ]
+            
+            return images
+        
+        except Exception as e:
+            print(f"Image search error: {str(e)}")
+            return []
+
+
 class FOSTASCore:
     """
-    FOSTAS: Multi-Agent AI App Studio with SVG + Emoji Graphics
-    - Nemotron: UX/UI Architect
-    - DeepSeek: Technical Architect
-    - GLM-5.2: Code Master (Writes HTML/JS + SVG Graphics)
-    - GPT-OSS: QA Inspector
-    - Llama 3.3: Fallback Engine
+    FOSTAS v8: Connected Multi-Agent + Dynamic Image Links
+    
+    Agents (Yapyzekalar):
+    1. Nemotron → Lead Architect (Plan)
+    2. DeepSeek → Research Agent (Image requirements)
+    3. Image Search Agent → Fotoğraf linki ara
+    4. GLM-5.2 → Code Master (HTML yaz)
+    5. GPT-OSS → QA Engineer (Kontrol)
+    6. Llama → Fallback (Acil durum)
     """
 
     def __init__(self):
-        self.raw_game_html = ""
-        self.project_memory = {
-            "assets": [],
-            "docs": "",
-            "app_type": None
-        }
+        self.raw_html = ""
+        self.shared_memory = SharedMemory()
+        self.image_search_agent = ImageSearchAgent()
+        self.generation_log = []
         
-        # Initialize NVIDIA API clients
+        # API Keys
         self.nv_keys = {
             "nemotron": os.getenv("NV_NEMOTRON_KEY"),
             "deepseek": os.getenv("NV_DEEPSEEK_KEY"),
@@ -38,9 +170,8 @@ class FOSTASCore:
         self.nv_base_url = "https://integrate.api.nvidia.com/v1"
         self.clients = {}
         self.status = {}
-        self.generation_log = []
 
-        # Initialize all clients
+        # Initialize clients
         for model_name, key in self.nv_keys.items():
             if key:
                 try:
@@ -49,500 +180,237 @@ class FOSTASCore:
                 except Exception as e:
                     self.status[model_name] = {"ok": False, "error": str(e)}
             else:
-                self.status[model_name] = {"ok": False, "error": "API key missing in .env"}
+                self.status[model_name] = {"ok": False, "error": "API key missing"}
 
-    def _log_step(self, agent_name: str, action: str):
-        """Log generation steps for UI feedback"""
+    def _log_step(self, agent: str, action: str):
+        """Log işlemi"""
         self.generation_log.append({
-            "agent": agent_name,
+            "agent": agent,
             "action": action,
             "timestamp": time.time()
         })
 
     def _nvidia_chat(self, model_client: str, model_name: str, prompt: str, 
-                     max_tokens: int = 4096, temperature: float = 0.7, 
-                     extra_body: dict = None) -> str:
-        """Call NVIDIA API via OpenAI SDK"""
+                     max_tokens: int = 2048, temperature: float = 0.7) -> str:
+        """NVIDIA API call"""
         if model_client not in self.clients:
-            return f"ERROR: {model_client} client not initialized"
+            return f"ERROR: {model_client} not initialized"
         
         client = self.clients[model_client]
         try:
-            kwargs = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": False
-            }
-            if extra_body:
-                kwargs["extra_body"] = extra_body
-
-            completion = client.chat.completions.create(**kwargs)
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=False
+            )
             return completion.choices[0].message.content
         except Exception as e:
             return f"ERROR: {str(e)}"
 
-    def upload_document(self, text: str):
-        """Store user uploaded document"""
-        self.project_memory["docs"] = text[:5000]
-        self._log_step("System", "Document uploaded")
-
-    def register_user_asset(self, filename: str, file_data: bytes):
-        """Register user uploaded image/asset"""
-        safe_name = filename.replace(" ", "_")
-        encoded_data = base64.b64encode(file_data).decode('utf-8')
-        
-        existing = next((a for a in self.project_memory["assets"] if a["name"] == safe_name), None)
-        if existing:
-            existing["data"] = file_data
-            existing["b64"] = encoded_data
-        else:
-            self.project_memory["assets"].append({
-                "name": safe_name, 
-                "path": f"res://assets/{safe_name}",
-                "data": file_data,
-                "b64": encoded_data,
-                "mime": self._guess_mime(filename)
-            })
-        self._log_step("System", f"Asset registered: {safe_name}")
-        return f"res://assets/{safe_name}"
-
-    def _guess_mime(self, filename: str) -> str:
-        """Guess MIME type from filename"""
-        ext = filename.lower().split('.')[-1]
-        mime_map = {
-            "png": "image/png",
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "gif": "image/gif",
-            "svg": "image/svg+xml",
-            "webp": "image/webp",
-        }
-        return mime_map.get(ext, "application/octet-stream")
-
     def _clean_html(self, code: str) -> str:
-        """Remove markdown formatting from HTML code"""
+        """HTML temizle"""
         code = code.strip()
-        code = re.sub(r"^```(html|javascript|js)?\n?", "", code)
+        code = re.sub(r"^```(html)?\n?", "", code)
         code = re.sub(r"\n?```$", "", code)
         code = re.sub(r"```", "", code)
         return code.strip()
 
-    def _inject_user_asset(self, code: str) -> str:
-        """Inject user uploaded asset into HTML as base64 data URI"""
-        if not self.project_memory["assets"]:
-            return code
-        
-        asset = self.project_memory["assets"][0]
-        b64 = asset["b64"]
-        mime = asset["mime"]
-        data_uri = f"data:{mime};base64,{b64}"
-        
-        code = code.replace("{{USER_IMAGE}}", data_uri)
-        code = code.replace("{{ASSET}}", data_uri)
-        code = code.replace("USER_ASSET", data_uri)
-        code = code.replace("{{LOGO}}", data_uri)
-        
-        if mime.startswith("image/"):
-            code = re.sub(r'src=["\']USER_[^"\']*["\']', f'src="{data_uri}"', code)
-            code = re.sub(r'src=["\']ASSET["\']', f'src="{data_uri}"', code)
-        
-        return code
-
     def _create_fallback_html(self, prompt: str) -> str:
-        """Create a beautiful fallback HTML"""
-        emoji_map = {
-            "oyun": "🎮",
-            "game": "🎮",
-            "restoran": "🍕",
-            "restaurant": "🍕",
-            "müze": "🏛️",
-            "museum": "🏛️",
-            "portföy": "💼",
-            "portfolio": "💼",
-            "alışveriş": "🛒",
-            "shop": "🛒",
-            "video": "🎥",
-            "blog": "📝",
-            "chat": "💬",
-            "app": "📱",
-        }
-        
-        emoji = "📱"
-        for key, val in emoji_map.items():
-            if key.lower() in prompt.lower():
-                emoji = val
-                break
-        
-        title = prompt[:40] if len(prompt) < 40 else prompt[:37] + "..."
-        
-        fallback_html = f"""<!DOCTYPE html>
+        """Fallback HTML"""
+        return f"""<!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FOSTAS - {title}</title>
+    <title>FOSTAS - {prompt[:30]}</title>
     <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
         }}
-        
         .container {{
             background: white;
             border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             padding: 40px;
-            max-width: 700px;
+            max-width: 600px;
             text-align: center;
-            animation: slideUp 0.6s ease;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }}
-        
-        @keyframes slideUp {{
-            from {{
-                opacity: 0;
-                transform: translateY(20px);
-            }}
-            to {{
-                opacity: 1;
-                transform: translateY(0);
-            }}
-        }}
-        
-        .emoji {{
-            font-size: 80px;
-            margin-bottom: 20px;
-            display: block;
-            animation: bounce 1.5s infinite;
-        }}
-        
-        @keyframes bounce {{
-            0%, 100% {{ transform: translateY(0); }}
-            50% {{ transform: translateY(-10px); }}
-        }}
-        
         h1 {{
-            color: #333;
-            font-size: 32px;
-            margin-bottom: 10px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-        }}
-        
-        .subtitle {{
-            color: #666;
-            font-size: 18px;
-            margin-bottom: 30px;
-        }}
-        
-        .info {{
-            background: #f5f5f5;
-            border-left: 4px solid #667eea;
-            padding: 20px;
-            margin: 30px 0;
-            border-radius: 8px;
-            text-align: left;
-        }}
-        
-        .features {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin: 30px 0;
-        }}
-        
-        .feature {{
-            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid #667eea30;
-        }}
-        
-        .feature-icon {{
             font-size: 32px;
-            margin-bottom: 10px;
+            margin-bottom: 20px;
         }}
-        
-        .feature-title {{
-            color: #667eea;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }}
-        
+        p {{ color: #666; line-height: 1.6; margin: 15px 0; }}
         button {{
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            padding: 14px 28px;
+            padding: 15px 30px;
             border-radius: 8px;
+            cursor: pointer;
             font-size: 16px;
             font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
             margin-top: 20px;
         }}
-        
-        button:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.6);
-        }}
-        
+        button:hover {{ transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102,126,234,0.4); }}
         @media (max-width: 600px) {{
-            .container {{
-                padding: 25px;
-            }}
-            h1 {{
-                font-size: 24px;
-            }}
-            .emoji {{
-                font-size: 60px;
-            }}
-            .features {{
-                grid-template-columns: 1fr;
-            }}
+            .container {{ padding: 25px; }}
+            h1 {{ font-size: 24px; }}
         }}
     </style>
 </head>
 <body>
     <div class="container">
-        <span class="emoji">{emoji}</span>
-        <h1>FOSTAS AI Studio</h1>
-        <p class="subtitle">🚀 Yapay Zeka ile Oluşturuldu</p>
-        
-        <div class="info">
-            <p><strong>📌 Başlık:</strong> {title}</p>
-            <p>Bu uygulama FOSTAS OS tarafından otomatik olarak tasarlanmıştır.</p>
-        </div>
-        
-        <div class="features">
-            <div class="feature">
-                <div class="feature-icon">⚡</div>
-                <div class="feature-title">Hızlı</div>
-            </div>
-            <div class="feature">
-                <div class="feature-icon">📱</div>
-                <div class="feature-title">Responsive</div>
-            </div>
-            <div class="feature">
-                <div class="feature-icon">🎨</div>
-                <div class="feature-title">Modern</div>
-            </div>
-            <div class="feature">
-                <div class="feature-icon">🔧</div>
-                <div class="feature-title">Esnek</div>
-            </div>
-        </div>
-        
-        <button onclick="alert('FOSTAS tarafından oluşturuldu!')">🎮 Başla</button>
+        <h1>FOSTAS</h1>
+        <p>Yapay zeka tarafından oluşturulan uygulama</p>
+        <p>{prompt[:60]}</p>
+        <button onclick="alert('FOSTAS tarafından oluşturuldu!')">Başla</button>
     </div>
 </body>
 </html>"""
-        return fallback_html
-
-    def _add_interactivity_layer(self, code: str) -> str:
-        """Add global button handler + drag-drop functionality"""
-        interactivity_script = """
-<script>
-window.addEventListener('load', function() {
-    document.querySelectorAll('button').forEach(btn => {
-        if (!btn.hasAttribute('onclick') && !btn.onclick) {
-            btn.addEventListener('click', function() {
-                const startFunctions = [
-                    'startApp', 'initGame', 'startGame', 'beginApp', 'init',
-                    'start', 'play', 'launch', 'begin', 'run', 'execute'
-                ];
-                
-                startFunctions.forEach(fn => {
-                    if (typeof window[fn] === 'function') {
-                        window[fn]();
-                    }
-                });
-                
-                const startScreens = document.querySelectorAll('[id*="start"], [id*="menu"], [id*="screen"]');
-                startScreens.forEach(el => {
-                    if (el.style.display !== 'flex' && el.style.display !== 'grid') {
-                        el.style.display = 'none';
-                    }
-                });
-                
-                const mainContent = document.querySelectorAll('[id*="main"], [id*="game"], [id*="app"], [id*="content"]');
-                mainContent.forEach(el => el.style.display = 'block');
-            });
-        }
-    });
-    
-    document.querySelectorAll('img, [data-draggable="true"], svg').forEach(el => {
-        el.style.cursor = 'grab';
-        let isDragging = false;
-        let offset = { x: 0, y: 0 };
-        
-        el.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            el.style.cursor = 'grabbing';
-            el.style.zIndex = 9999;
-            el.style.position = 'relative';
-            offset.x = e.clientX - el.offsetLeft;
-            offset.y = e.clientY - el.offsetTop;
-            e.preventDefault();
-        });
-        
-        document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                el.style.left = (e.clientX - offset.x) + 'px';
-                el.style.top = (e.clientY - offset.y) + 'px';
-            }
-        });
-        
-        document.addEventListener('mouseup', () => {
-            if (isDragging) {
-                isDragging = false;
-                el.style.cursor = 'grab';
-            }
-        });
-    });
-});
-</script>
-"""
-        if "</body>" in code:
-            return code.replace("</body>", interactivity_script + "</body>")
-        else:
-            return code + interactivity_script + "</body></html>"
-
-    def generate_app_from_doc(self) -> bool:
-        """Generate app from uploaded document"""
-        if not self.project_memory["docs"].strip():
-            return False
-        
-        doc_summary = self.project_memory["docs"][:500]
-        prompt = f"Yüklenen dökümana göre bir web uygulaması yap:\n\n{doc_summary}"
-        return self.generate_app(prompt)
 
     def generate_app(self, user_prompt: str) -> bool:
         """
-        Main app generation pipeline
+        BAĞLI YAPYZEKA PIPELINE:
+        1. Nemotron → Plan
+        2. DeepSeek → Fotoğraf gereksinimleri
+        3. ImageSearchAgent → Fotoğraf linki ara
+        4. GLM-5.2 → HTML kod yaz (linkler ile)
+        5. GPT-OSS → QA
+        6. Llama → Fallback
         """
         
         self.generation_log = []
-        doc_context = self.project_memory["docs"] if self.project_memory["docs"] else "None"
+        self.shared_memory.set("user_prompt", user_prompt)
         
-        # ============ STAGE 1: NEMOTRON (Architect) ============
+        # ===== STAGE 1: NEMOTRON (Lead Architect) =====
         self._log_step("🧠 Nemotron", "Mimarlık planlıyor...")
         
-        nemotron_prompt = f"""Kullanıcı istediği: "{user_prompt}"
-Bağlam: "{doc_context}"
+        nemotron_prompt = f"""Kullanıcı istiyor: "{user_prompt}"
 
 Lütfen detaylı plan yap:
-1. App türü (oyun, website, tool, vb.)
-2. Ana özellikler (3-5 madde)
-3. Görsel stil (modern, retro, minimalist, vb.)
-4. Kilit interaksiyonlar
-5. Hangi SVG/Emoji grafikler lazım?
+1. Uygulama türü (Web site / Mobile app)
+2. Hedef kullanıcılar
+3. Ana özellikler (4-5 madde)
+4. Tasarım stili (modern, minimalist, vb.)
+5. Hangi tür fotoğraflar lazım? (açıklama)
 
-Markdown kullanma."""
+Markdown KULLANMA, kısa olsun."""
 
         app_plan = self._nvidia_chat(
             "nemotron",
             "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
             nemotron_prompt,
-            max_tokens=1000,
-            temperature=0.6,
-            extra_body={"reasoning_budget": 2048}
+            max_tokens=800,
+            temperature=0.6
         )
         
-        if "ERROR" in app_plan or len(app_plan) < 100:
-            self._log_step("⚠️ Nemotron", "Llama'ya geçiş...")
+        if "ERROR" in app_plan or len(app_plan) < 50:
             app_plan = self._nvidia_chat(
                 "llama",
                 "meta/llama-3.3-70b-instruct",
                 nemotron_prompt,
-                max_tokens=800,
-                temperature=0.5
+                max_tokens=600
             )
         
-        self._log_step("✅ Nemotron", "Plan hazır")
+        self.shared_memory.set("app_plan", app_plan)
+        self._log_step("✅ Nemotron", "Plan hazır - DeepSeek'e gidiyor")
 
-        # ============ STAGE 2: DEEPSEEK (Engineer) ============
-        self._log_step("⚙️ DeepSeek", "Teknik spesifikasyon yazıyor...")
+        # ===== STAGE 2: DEEPSEEK (Research Agent) =====
+        self._log_step("📚 DeepSeek", "Fotoğraf araştırması yapıyor...")
         
-        deepseek_prompt = f"""Plan: {app_plan}
+        deepseek_prompt = f"""Nemotron'un Planı:
+{app_plan}
 
-Lütfen teknik spesifikasyon yaz:
-1. HTML yapısı (ana sections)
-2. CSS yaklaşımı (layout, animasyonlar, responsive)
-3. Lazım olan JavaScript functions
-4. SVG şekilleri neler olmalı?
-5. Emoji kullanılabilir mi?
+Bunun için hangi fotoğraflar lazım?
+Lütfen 5-7 arama terimini listele (internette aranacak):
 
-Markdown kullanma."""
+Format:
+1. [Terim 1]
+2. [Terim 2]
+...
 
-        tech_spec = self._nvidia_chat(
+Sadece terimler, başka birşey YOKTUR."""
+
+        research_result = self._nvidia_chat(
             "deepseek",
             "deepseek-ai/deepseek-v4-pro",
             deepseek_prompt,
-            max_tokens=1500,
+            max_tokens=600,
             temperature=0.6,
             extra_body={"chat_template_kwargs": {"thinking": False}}
         )
         
-        if "ERROR" in tech_spec or len(tech_spec) < 100:
-            tech_spec = app_plan
+        # Terimleri çıkar
+        search_terms = re.findall(r'^\d+\.\s*(.+?)$', research_result, re.MULTILINE)
+        search_terms = [term.strip() for term in search_terms if term.strip()]
         
-        self._log_step("✅ DeepSeek", "Spesifikasyon hazır")
-
-        # ============ STAGE 3: GLM-5.2 (Master Coder) ============
-        self._log_step("💻 GLM-5.2", "Kod ve grafikler yazıyor...")
+        if not search_terms:
+            search_terms = [user_prompt, "professional", "modern design"]
         
-        asset_info = ""
-        if self.project_memory["assets"]:
-            asset_name = self.project_memory["assets"][0]["name"]
-            asset_info = f"\nKullanıcı '{asset_name}' adında resim yükledi. Bunu {{{{USER_IMAGE}}}} olarak kodda kullan."
+        self.shared_memory.set("search_queries", search_terms)
+        self._log_step("✅ DeepSeek", f"Araştırma tamamlandı - {len(search_terms)} terim bulundu")
+
+        # ===== STAGE 3: IMAGE SEARCH AGENT =====
+        self._log_step("🖼️ Image Search Agent", f"Internetten fotoğraf linki arıyor ({len(search_terms)} terim)...")
         
-        glm_prompt = f"""Dünyanın en iyi web geliştiricisisin. TEK bir HTML dosyası yaz.
+        all_image_links = []
+        
+        for term in search_terms[:5]:  # Max 5 search
+            self._log_step("🔍 Searching", f"Arıyor: {term}")
+            images = self.image_search_agent.search_image_links(term, count=3)
+            
+            for img in images[:2]:  # Her terim için max 2 resim
+                all_image_links.append({
+                    "url": img['url'],
+                    "title": f"{term} - {img['source']}",
+                    "source": img['source']
+                })
+        
+        # Duplicates kaldır
+        unique_links = {img['url']: img for img in all_image_links}.values()
+        all_image_links = list(unique_links)[:8]  # Max 8 fotoğraf
+        
+        self.shared_memory.set("image_links", all_image_links)
+        self._log_step("✅ Image Search", f"{len(all_image_links)} fotoğraf linki bulundu")
 
-İstek: "{user_prompt}"
-Plan: {app_plan}
-Spesifikasyon: {tech_spec}
-{asset_info}
+        # ===== STAGE 4: GLM-5.2 (Code Master) =====
+        self._log_step("💻 GLM-5.2", "HTML kod yazıyor...")
+        
+        # Image links JSON format
+        images_json = json.dumps(
+            [{"url": img['url'], "title": img['title']} for img in all_image_links],
+            ensure_ascii=False
+        )
+        
+        glm_prompt = f"""Plan:
+{app_plan}
 
-KURALLLAR (ÇOK ÖNEMLİ):
+Mevcut Fotoğraf Linkler ({len(all_image_links)} adet):
+{images_json}
+
+TEK bir HTML dosyası yaz:
 1. <!DOCTYPE html> ile başla
-2. Tüm HTML, CSS, JavaScript tek dosyada
-3. Responsive (mobile-first)
-4. TÜM button'lar onclick="..." kullan, addEventListener KULLANMA
-5. Tüm JS functions GLOBAL olsun (window.func = function() {{}})
-6. Oyunsa: Canvas veya DOM manipulation kullan
-7. **SVG graphics inline yaz** - gerçek resim indirme YAPMA
-8. **Çok Emoji kullan!** 🎮🎯🎨🚀⭐
-9. CSS gradients ve smooth animasyonlar
-10. Hiç external link yok, tümü inline
+2. Responsive design (mobile-first)
+3. Modern CSS (gradients, animations)
+4. Fotoğrafları <img src="[LINK]"> ile koy (indirme DEĞİL, link kullan)
+5. Professional ve güzel görünsün
+6. TÜM button'lar onclick="..." kullansın
 
-ÖRNEK SVG (araba oyunu için):
-```javascript
-function createCarSVG() {{
-    return `<svg viewBox="0 0 100 50">
-        <rect x="10" y="15" width="80" height="20" fill="#FF4B4B"/>
-        <circle cx="25" cy="35" r="8" fill="#333"/>
-        <circle cx="75" cy="35" r="8" fill="#333"/>
-    </svg>`;
-}}
-```
-
-SADECEhtml KOD, MARKDOWN YOKTUR. <!DOCTYPE html> İLE BAŞLA!"""
+SADECEhtml KOD! MARKDOWN YOKTUR!
+<!DOCTYPE html> ile başla!"""
 
         code = self._nvidia_chat(
             "glm",
@@ -552,80 +420,54 @@ SADECEhtml KOD, MARKDOWN YOKTUR. <!DOCTYPE html> İLE BAŞLA!"""
             temperature=0.7
         )
         
-        # Fallback 1: DeepSeek
-        if "ERROR" in code or len(code) < 300 or "<!DOCTYPE" not in code:
-            self._log_step("⚠️ GLM-5.2", "DeepSeek'e geçiş...")
-            code = self._nvidia_chat(
-                "deepseek",
-                "deepseek-ai/deepseek-v4-pro",
-                glm_prompt,
-                max_tokens=8000,
-                temperature=0.7,
-                extra_body={"chat_template_kwargs": {"thinking": False}}
-            )
-        
-        # Fallback 2: Llama
-        if "ERROR" in code or len(code) < 300 or "<!DOCTYPE" not in code:
-            self._log_step("⚠️ DeepSeek", "Llama'ya geçiş...")
-            code = self._nvidia_chat(
-                "llama",
-                "meta/llama-3.3-70b-instruct",
-                glm_prompt,
-                max_tokens=5000,
-                temperature=0.7
-            )
-        
-        self._log_step("✅ GLM-5.2", "Kod yazıldı")
+        self.shared_memory.set("final_code", code)
+        self._log_step("✅ GLM-5.2", "Kod yazıldı - GPT-OSS'a gidiyor")
 
-        # ============ STAGE 4: GPT-OSS (QA Inspector) ============
+        # ===== STAGE 5: GPT-OSS (QA) =====
+        self._log_step("🔍 GPT-OSS", "Kalite kontrol yapıyor...")
+        
         if "<!DOCTYPE" in code or "<html" in code:
-            self._log_step("🔍 GPT-OSS", "Kalite kontrol yapıyor...")
-            
-            code_sample = code[:4000]
-            qa_prompt = f"""Bu HTML kodunu kontrol et:
+            qa_prompt = f"""Bu HTML kodu kontrol et:
 
-{code_sample}
+{code[:3000]}
 
 Kontrol et:
 1. <!DOCTYPE html> var mı?
-2. Button'lar onclick kullanıyor mu?
-3. JS functions global mi?
-4. SVG grafikleri düzgün mü?
-5. HTML valid mi?
-6. Mobile responsive mi?
+2. Fotoğraf linkler doğru mı (img src=...)?
+3. Mobile responsive mi?
+4. Button'lar var mı?
 
-Sorun bulursan düzelt. SADECE HTML kodu ver, başka birşey yok.
-"""
-
+Sorun varsa düzelt. SADECE HTML!"""
+            
             reviewed = self._nvidia_chat(
                 "gpt_oss",
                 "openai/gpt-oss-120b",
                 qa_prompt,
                 max_tokens=6000,
-                temperature=0.5
+                temperature=0.4
             )
             
             if ("<!DOCTYPE" in reviewed or "<html" in reviewed) and len(reviewed) > 300:
                 code = reviewed
-            
-            self._log_step("✅ GPT-OSS", "QA geçti")
+        
+        self._log_step("✅ GPT-OSS", "QA geçti")
 
-        # ============ FINAL PROCESSING ============
+        # ===== FINAL =====
         code = self._clean_html(code)
         
-        # Inject user assets
-        if self.project_memory["assets"]:
-            code = self._inject_user_asset(code)
-            self._log_step("✅ System", "Kullanıcı resmi eklendi")
-        
-        # Add interactivity layer
         if "<!DOCTYPE" in code or "<html" in code:
-            code = self._add_interactivity_layer(code)
-            self.raw_game_html = code
-            self._log_step("✅ System", "Uygulama tamamlandı")
+            self.raw_html = code
+            self._log_step("✅ System", "Uygulama tamamlandı!")
             return True
-        
-        # Ultimate fallback
-        self._log_step("⚠️ System", "Fallback template kullanılıyor...")
-        self.raw_game_html = self._create_fallback_html(user_prompt)
-        return True
+        else:
+            self.raw_html = self._create_fallback_html(user_prompt)
+            self._log_step("⚠️ System", "Fallback HTML kullanılıyor")
+            return True
+
+    def get_logs(self) -> list:
+        """Üretim loglarını al"""
+        return self.generation_log
+
+    def get_memory(self) -> dict:
+        """Shared memory'i al"""
+        return self.shared_memory.get_all()
