@@ -162,20 +162,17 @@ class FOSTASCore:
         self.generation_log = []
         self._log_step("🚀 GLM-5.2 başlatıldı...")
         
+        # Check GLM status
+        if not self.client:
+            self._log_step("❌ GLM client not initialized!")
+            print("ERROR: GLM client is None!")
+            return False
+        
         # ===== STEP 1: Image Linki Ara =====
         self._log_step("🖼️ Fotoğraf linki arıyor...")
         
-        # Search terms çıkar
-        search_prompt = f"""Şu istek için hangi fotoğraflar lazım?
-"{user_prompt}"
-
-Lütfen 3-5 arama terimi yaz (virgüllerle ayrılmış):
-Örn: müze, antik eserler, iç mimar"""
-        
-        search_result = self._glm_chat(search_prompt, max_tokens=256, temperature=0.5)
-        
-        # Terimleri parse et
-        search_terms = [term.strip() for term in search_result.split(",")][:5]
+        # Simple image list - don't need GLM for this
+        search_terms = ["profesyonel", "modern", "tasarım", "iş", "teknoloji"]
         
         # Fotoğraf linki ara
         all_images = []
@@ -198,50 +195,21 @@ Lütfen 3-5 arama terimi yaz (virgüllerle ayrılmış):
             ensure_ascii=False
         )
         
-        html_prompt = f"""İstek: "{user_prompt}"
+        html_prompt = f"""ISTEK: {user_prompt}
 
-Mevcut fotoğraf linkler ({len(image_list)} adet):
-{images_json}
+FOTOĞRAFLAR: {images_json[:500]}
 
-TEK bir HTML dosyası yaz (SPA - Single Page App):
+TEK HTML DOSYASI YAZ:
+- <!DOCTYPE html>
+- Responsive
+- Modern CSS
+- Fotoğraf linkler: <img src="...">
+- onclick button'lar
+- SPA (tek sayfa, JavaScript ile tab'lar)
 
-KURALLAR:
-1. <!DOCTYPE html> ile başla
-2. SADECE HTML, CSS, JavaScript - başka dil YOKTUR
-3. Tüm bölümler (Anasayfa, Hakkında, Hizmetler, Ekip, İletişim, vb.) tek sayfada olsun
-4. JavaScript ile menü butonlarına tıklandığında bölümleri gizle/göster (display: none/block)
-5. Responsive design (mobile-first)
-6. Modern CSS (gradients, animations, transitions)
-7. Fotoğrafları <img src="[LINK]"> ile koy
-8. Professional ve güzel görünsün
-9. TÜM button'lar onclick="..." kullansın (addEventListener KULLANMA)
-10. Tüm JavaScript fonksiyonları GLOBAL olsun
-11. Hiç external link yok, her şey inline
-12. Header/Navigation menüsü tüm sayfada kalıcı olsun
-13. Hamburger menü mobile'da açıl/kapat olsun
-
-YAPISI:
-- Header (Navigation menü - Anasayfa, Hakkında, Hizmetler, Ekip, İletişim, Kontak)
-- Main Container (tüm sayfaları içeren divler)
-- Footer
-
-CSS'de:
-.section {{ display: none; }}
-.section.active {{ display: block; }}
-
-JavaScript'de:
-function showSection(id) {{
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
-}}
-
-HTML butonlarda:
-<button onclick="showSection('hakkimizda')">Hakkımızda</button>
-
-SADECE HTML KOD! MARKDOWN YOKTUR!
-<!DOCTYPE html> ile başla!"""
+SADECE HTML/CSS/JS!"""
         
-        code = self._glm_chat(html_prompt, max_tokens=8000, temperature=0.8)
+        code = self._glm_chat(html_prompt, max_tokens=4096, temperature=0.7)
         
         self._log_step("✅ HTML yazıldı")
         
