@@ -6,23 +6,28 @@ st.set_page_config(page_title="FOSTAS", page_icon="🌐", layout="wide")
 
 st.title("🌐 FOSTAS - Web Sitesi Yap")
 
-# Input
-prompt = st.text_input("Web sitesi için prompt yaz:", placeholder="Örn: Bana bir kafe web sitesi yap")
-
 # Buttons
 col1, col2, col3 = st.columns(3)
 
+prompt_override = None
+
 with col1:
-    if st.button("☕ Kafe Sitesi", use_container_width=True):
-        prompt = "Profesyonel kafe web sitesi"
+    if st.button("☕ Kafe Sitesi", use_container_width=True, key="btn_kafe"):
+        prompt_override = "Profesyonel kafe web sitesi"
 
 with col2:
-    if st.button("🏛️ Müze Sitesi", use_container_width=True):
-        prompt = "Müze web sitesi"
+    if st.button("🏛️ Müze Sitesi", use_container_width=True, key="btn_muze"):
+        prompt_override = "Müze web sitesi"
 
 with col3:
-    if st.button("💼 İşletme Sitesi", use_container_width=True):
-        prompt = "İşletme web sitesi"
+    if st.button("💼 İşletme Sitesi", use_container_width=True, key="btn_isletme"):
+        prompt_override = "İşletme web sitesi"
+
+# Input
+prompt = st.text_input("Web sitesi için prompt yaz:", placeholder="Örn: Bana bir kafe web sitesi yap", value=prompt_override or "")
+
+if prompt_override:
+    prompt = prompt_override
 
 # Create button
 if st.button("🚀 Oluştur", use_container_width=True, type="primary"):
