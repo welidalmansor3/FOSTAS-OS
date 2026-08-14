@@ -14,22 +14,23 @@ with col1:
 
 with col2:
     st.subheader("⚡ Örnekler")
-    templates = ["☕ Kafe", "🏛️ Müze", "💼 İşletme", "🏨 Otel", "📚 Blog"]
     
-    if st.button("☕ Kafe", use_container_width=True):
-        st.session_state.prompt = "Profesyonel kafe web sitesi"
-    if st.button("🏛️ Müze", use_container_width=True):
-        st.session_state.prompt = "Müze web sitesi"
-    if st.button("💼 İşletme", use_container_width=True):
-        st.session_state.prompt = "İşletme web sitesi"
-    if st.button("🏨 Otel", use_container_width=True):
-        st.session_state.prompt = "Otel web sitesi"
-    if st.button("📚 Blog", use_container_width=True):
-        st.session_state.prompt = "Blog web sitesi"
-
-if 'prompt' in st.session_state:
-    prompt = st.session_state.prompt
-    st.session_state.prompt = None
+    btn1 = st.button("☕ Kafe", use_container_width=True, key="btn_kafe")
+    btn2 = st.button("🏛️ Müze", use_container_width=True, key="btn_muze")
+    btn3 = st.button("💼 İşletme", use_container_width=True, key="btn_isletme")
+    btn4 = st.button("🏨 Otel", use_container_width=True, key="btn_otel")
+    btn5 = st.button("📚 Blog", use_container_width=True, key="btn_blog")
+    
+    if btn1:
+        prompt = "Profesyonel kafe web sitesi"
+    elif btn2:
+        prompt = "Müze web sitesi"
+    elif btn3:
+        prompt = "İşletme web sitesi"
+    elif btn4:
+        prompt = "Otel web sitesi"
+    elif btn5:
+        prompt = "Blog web sitesi"
 
 if 'fostas' not in st.session_state:
     st.session_state.fostas = FOSTASCore()
