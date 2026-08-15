@@ -1,31 +1,33 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from fostas_brain import MEDOSite
+from fostas_brain import WebBuilder
 
-st.set_page_config(page_title="MEDO Kliniği", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="FOSTAS", page_icon="🌐", layout="wide")
 
-st.title("🏥 MEDO - Tıbbi Kliniği Web Sitesi")
+st.title("🌐 FOSTAS - Web Sitesi")
 
-if st.button("🚀 MEDO Sitesi Oluştur", use_container_width=True, type="primary"):
-    with st.spinner("5 Yapyzeka çalışıyor... Nemotron → DeepSeek → GLM → GPT-OSS → Llama"):
-        medo = MEDOSite()
-        success = medo.create()
-    
-    if success:
-        st.success("✅ MEDO Web Sitesi Tamamlandı!")
+prompt = st.text_input("Prompt:", placeholder="Bana bir web sitesi yap")
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    if st.button("☕", use_container_width=True):
+        prompt = "Kafe web sitesi"
+with c2:
+    if st.button("🏛️", use_container_width=True):
+        prompt = "Müze web sitesi"
+with c3:
+    if st.button("💼", use_container_width=True):
+        prompt = "İşletme web sitesi"
+
+if st.button("🚀 Yap", use_container_width=True):
+    if prompt:
+        with st.spinner("Yapılıyor..."):
+            wb = WebBuilder()
+            wb.build(prompt)
         
-        st.subheader("👀 Sitesi Önizleme")
-        components.html(medo.html, height=1200, scrolling=True)
+        st.subheader("Web Sitesi")
+        components.html(wb.html, height=800, scrolling=True)
         
-        st.download_button(
-            label="⬇️ MEDO Sitesini İndir (HTML)",
-            data=medo.html.encode('utf-8'),
-            file_name="MEDO_Kliniği.html",
-            mime="text/html",
-            use_container_width=True
-        )
+        st.download_button("⬇️ İndir", wb.html.encode('utf-8'), "site.html", "text/html", use_container_width=True)
     else:
-        st.error("Hata oluştu")
-
-st.markdown("---")
-st.info("🏥 MEDO profesyonel tıbbi kliniği web sitesi - 5 yapyzeka tarafından oluşturuldu!")
+        st.error("Prompt yaz!")
