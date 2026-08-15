@@ -54,9 +54,45 @@ class FOSTASMedo:
         except:
             return "ERROR"
 
+    def _download_images(self):
+        """Fotoğrafları indir ve base64'e çevir"""
+        self.log("📸 Image Downloader", "Fotoğraflar indiriliyor...")
+        
+        import requests
+        import base64
+        
+        image_urls = [
+            "https://picsum.photos/800/600?random=1",
+            "https://picsum.photos/800/600?random=2",
+            "https://picsum.photos/800/600?random=3",
+            "https://picsum.photos/800/600?random=4",
+            "https://picsum.photos/800/600?random=5",
+            "https://picsum.photos/800/600?random=6",
+        ]
+        
+        base64_images = []
+        
+        for i, url in enumerate(image_urls):
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    b64 = base64.b64encode(response.content).decode('utf-8')
+                    data_uri = f"data:image/jpeg;base64,{b64}"
+                    base64_images.append(data_uri)
+                    self.log("📸 Downloaded", f"Resim {i+1}/6")
+            except:
+                # Fallback placeholder
+                base64_images.append(f"https://via.placeholder.com/800x600?text=Resim+{i+1}")
+        
+        self.log("✅ Images", f"{len(base64_images)} resim hazır")
+        return base64_images
+
     def create(self, prompt):
         """Medo sitesi oluştur"""
         self.logs = []
+        
+        # Fotoğrafları indir
+        images = self._download_images()
         
         # ===== 1. NEMOTRON (UX/UI Architect) =====
         self.log("🧠 Nemotron", "Site mimarisini planlıyor...")
@@ -107,15 +143,7 @@ Markdown YOKTUR."""
         # ===== 3. GLM-5.2 (Code Master - Ana) =====
         self.log("💻 GLM-5.2", "HTML+CSS+JS yazıyor...")
         
-        # Fotoğraf linkler (Picsum - 100% çalışır)
-        images = [
-            "https://picsum.photos/800/600?random=1",
-            "https://picsum.photos/800/600?random=2",
-            "https://picsum.photos/800/600?random=3",
-            "https://picsum.photos/800/600?random=4",
-            "https://picsum.photos/800/600?random=5",
-            "https://picsum.photos/800/600?random=6",
-        ]
+        # images zaten download edildi üstte
         
         code_prompt = f"""MEDO TARZINDA SPA WEBSITE YAP!
 
