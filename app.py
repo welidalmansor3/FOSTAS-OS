@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import streamlit as st
 import streamlit.components.v1 as components
 from fostas_brain import FOSTASBrain
