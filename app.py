@@ -1,33 +1,45 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from fostas_brain import WebBuilder
+from fostas_brain import FOSTASMedo
 
+# Config
 st.set_page_config(page_title="FOSTAS", page_icon="🌐", layout="wide")
 
-st.title("🌐 FOSTAS - Web Sitesi")
+# Title
+st.title("🌐 FOSTAS - Web Sitesi Yap")
 
-prompt = st.text_input("Prompt:", placeholder="Bana bir web sitesi yap")
+# Input
+prompt = st.text_input("Prompt yaz:", placeholder="Örn: Bana bir kafe web sitesi yap")
 
-c1, c2, c3 = st.columns(3)
-with c1:
-    if st.button("☕", use_container_width=True):
-        prompt = "Kafe web sitesi"
-with c2:
-    if st.button("🏛️", use_container_width=True):
-        prompt = "Müze web sitesi"
-with c3:
-    if st.button("💼", use_container_width=True):
-        prompt = "İşletme web sitesi"
-
-if st.button("🚀 Yap", use_container_width=True):
+# Create button
+if st.button("🚀 Oluştur", use_container_width=True, type="primary"):
     if prompt:
-        with st.spinner("Yapılıyor..."):
-            wb = WebBuilder()
-            wb.build(prompt)
+        # Generate
+        medo = FOSTASMedo()
+        success = medo.create(prompt)
         
-        st.subheader("Web Sitesi")
-        components.html(wb.html, height=800, scrolling=True)
+        # Show logs
+        st.subheader("📊 İşlem")
+        for log in medo.logs:
+            st.write(log)
         
-        st.download_button("⬇️ İndir", wb.html.encode('utf-8'), "site.html", "text/html", use_container_width=True)
+        st.markdown("---")
+        
+        # Preview
+        if success:
+            st.success("✅ Tamamlandı!")
+            st.subheader("👀 Ön İzleme")
+            components.html(medo.html, height=800, scrolling=True)
+            
+            # Download
+            st.download_button(
+                label="⬇️ İndir",
+                data=medo.html.encode('utf-8'),
+                file_name="site.html",
+                mime="text/html",
+                use_container_width=True
+            )
+        else:
+            st.error("Hata!")
     else:
         st.error("Prompt yaz!")
