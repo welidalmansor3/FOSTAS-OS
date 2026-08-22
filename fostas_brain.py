@@ -1,373 +1,271 @@
+import os
 import re
-import json
-import time
+import base64
 import requests
-from html.parser import HTMLParser
 from openai import OpenAI
 
-# ===== API Keys (Secure) =====
-API_KEYS = {
-    "nemotron": "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",
-    "deepseek": "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",
-    "glm": "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",
-    "gpt_oss": "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",
-    "llama": "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",
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+
+# NOT: Bu model ID'leri build.nvidia.com uzerinden dogrulandi (Agustos 2026).
+# Onceki versiyonda bazi model isimleri hataliydi (ornegin "nemotron-3-nano-omni-30b-a3b-reasoning"
+# ve "deepseek-v4-pro" NVIDIA katalogunda YOK) - bu yuzden o adimlar hep sessizce basarisiz oluyordu.
+MODELS = {
+    "nemotron": "nvidia/nemotron-3-nano-30b-a3b",   # plan
+    "deepseek": "deepseek-ai/deepseek-v3.2",         # teknik spec
+    "glm":      "z-ai/glm-5.2",                      # ana kod uretimi
+    "gpt_oss":  "openai/gpt-oss-120b",               # kalite kontrol (QA)
+    "llama":    "meta/llama-3.3-70b-instruct",       # yedek (fallback)
+}
+
+ENV_KEYS = {
+    "nemotron": "NV_NEMOTRON_KEY",
+    "deepseek": "NV_DEEPSEEK_KEY",
+    "glm":      "NV_GLM_KEY",
+    "gpt_oss":  "NV_GPT_OSS_KEY",
+    "llama":    "NV_LLAMA_KEY",
 }
 
 
-class HTMLValidator(HTMLParser):
-    """HTML validasyon"""
-    def __init__(self):
-        super().__init__()
-        self.has_doctype = False
-        self.has_html = False
-        self.tags = []
-        self.errors = []
-    
-    def handle_starttag(self, tag, attrs):
-        self.tags.append(tag)
-        if tag == "html":
-            self.has_html = True
-    
-    def feed(self, data):
-        if "<!DOCTYPE" in data or "<!doctype" in data:
-            self.has_doctype = True
-        try:
-            super().feed(data)
-        except Exception as e:
-            self.errors.append(str(e))
-    
-    def is_valid(self):
-        return self.has_doctype and self.has_html and len(self.errors) == 0
-
-
 class FOSTASBrain:
-    """FOSTAS v10 - Fixed & Validated"""
-    
     def __init__(self):
-        self.base_url = "https://integrate.api.nvidia.com/v1"
-        self.clients = {}
         self.logs = []
-        self.used_models = []
         self.total_tokens = 0
-        
-        # Initialize clients
-        for name, key in API_KEYS.items():
-            try:
-                self.clients[name] = OpenAI(base_url=self.base_url, api_key=key)
-            except Exception as e:
-                self._log(f"❌ {name}", f"Init error: {str(e)}")
+        self.used_models = []
+        self.clients = {}
+        self.key_status = {}
+
+        for agent, env_name in ENV_KEYS.items():
+            key = os.getenv(env_name)
+            self.key_status[agent] = bool(key)
+            if key:
+                self.clients[agent] = OpenAI(
+                    base_url=NVIDIA_BASE_URL,
+                    api_key=key,
+                    timeout=45.0,
+                )
 
     def _log(self, agent: str, msg: str):
-        """Log işlemi"""
-        entry = f"{agent}: {msg}"
-        self.logs.append(entry)
-        print(f"[{agent}] {msg}")
+        self.logs.append(f"{agent}: {msg}")
 
-    def _call_ai(self, agent: str, model: str, prompt: str, max_tokens: int = 2048, retry_count: int = 0) -> tuple:
-        """
-        AI çağırı - Improved error handling + timeout
-        Returns: (response, success, tokens_used)
-        """
+    def _call(self, agent: str, prompt: str, max_tokens: int = 1500, temperature: float = 0.7):
+        """Hicbir zaman exception firlatmaz. Gercek hatayi loglar. (text, ok) dondurur."""
         if agent not in self.clients:
-            return "", False, 0
-        
-        max_retries = 2
-        
+            self._log(f"❌ {agent}", f"API key yok ({ENV_KEYS[agent]} tanimli degil)")
+            return "", False
+
+        model = MODELS[agent]
         try:
             completion = self.clients[agent].chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
-                temperature=0.7,
-                timeout=30
+                temperature=temperature,
             )
-            
-            response = completion.choices[0].message.content
-            tokens = completion.usage.completion_tokens if hasattr(completion.usage, 'completion_tokens') else max_tokens
-            
-            self.used_models.append(model)
-            self.total_tokens += tokens
-            
-            return response, True, tokens
-            
-        except Exception as e:
-            error_msg = str(e)
-            
-            if retry_count < max_retries:
-                self._log(agent, f"Retry {retry_count + 1}/{max_retries}...")
-                time.sleep(2 ** retry_count)  # Exponential backoff
-                return self._call_ai(agent, model, prompt, max_tokens, retry_count + 1)
-            else:
-                self._log(agent, f"Failed: {error_msg}")
-                return "", False, 0
-
-    def _download_images(self) -> list:
-        """Fotoğrafları indir"""
-        self._log("📸 Images", "Downloading...")
-        
-        images = []
-        urls = [
-            "https://picsum.photos/800/600?random=1",
-            "https://picsum.photos/800/600?random=2",
-            "https://picsum.photos/800/600?random=3",
-            "https://picsum.photos/800/600?random=4",
-        ]
-        
-        for i, url in enumerate(urls):
+            text = completion.choices[0].message.content or ""
             try:
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    import base64
-                    b64 = base64.b64encode(response.content).decode('utf-8')
-                    data_uri = f"data:image/jpeg;base64,{b64}"
-                    images.append(data_uri)
-            except:
+                self.total_tokens += completion.usage.total_tokens
+            except Exception:
                 pass
-        
+            self.used_models.append(model)
+            return text, True
+        except Exception as e:
+            self._log(f"❌ {agent} ({model})", f"HATA: {e}")
+            return "", False
+
+    def test_connections(self):
+        """Her modele kucuk bir test istegi atar - gercekten baglanabiliyor mu diye."""
+        results = {}
+        for agent in MODELS:
+            if agent not in self.clients:
+                results[agent] = (False, f"API key yok ({ENV_KEYS[agent]})")
+                continue
+            text, ok = self._call(agent, "Sadece 'ok' yaz, baska hicbir sey yazma.", max_tokens=10, temperature=0)
+            if ok:
+                results[agent] = (True, (text or "").strip()[:60])
+            else:
+                last_error = self.logs[-1] if self.logs else "bilinmeyen hata"
+                results[agent] = (False, last_error)
+        return results
+
+    @staticmethod
+    def _extract_html(text: str) -> str:
+        """Modelin cevabinin icinden gercek HTML'i cikarir (aciklama/markdown olsa bile)."""
+        if not text:
+            return ""
+        match = re.search(r"<!DOCTYPE\s+html.*?</html>", text, re.IGNORECASE | re.DOTALL)
+        if match:
+            return match.group(0).strip()
+        match = re.search(r"<html.*?</html>", text, re.IGNORECASE | re.DOTALL)
+        if match:
+            return "<!DOCTYPE html>\n" + match.group(0).strip()
+        cleaned = text.strip()
+        cleaned = re.sub(r"^```(html)?\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```$", "", cleaned)
+        return cleaned.strip()
+
+    def _download_images(self, count: int = 4):
+        self._log("📸 Fotograflar", "Indiriliyor...")
+        images = []
+        for i in range(count):
+            url = f"https://picsum.photos/800/600?random={i}"
+            try:
+                r = requests.get(url, timeout=8)
+                if r.status_code == 200:
+                    b64 = base64.b64encode(r.content).decode("utf-8")
+                    images.append(f"data:image/jpeg;base64,{b64}")
+            except Exception as e:
+                self._log("⚠️ Fotograf", f"{i + 1}. indirilemedi: {e}")
+
         if not images:
-            # Fallback
-            images = [f"https://via.placeholder.com/800x600?text=Resim+{i}" for i in range(4)]
-        
-        self._log("✅ Images", f"{len(images)} downloaded")
+            images = [f"https://placehold.co/800x600?text=Resim+{i + 1}" for i in range(count)]
+
+        self._log("✅ Fotograflar", f"{len(images)} adet hazir")
         return images
 
-    def _validate_html(self, code: str) -> bool:
-        """HTML validation"""
-        validator = HTMLValidator()
-        validator.feed(code)
-        
-        if not validator.is_valid():
-            self._log("⚠️ Validation", f"Invalid HTML: {validator.errors}")
-            return False
-        
-        self._log("✅ Validation", "HTML valid")
-        return True
-
-    def _clean_html(self, code: str) -> str:
-        """HTML temizle"""
-        code = code.strip()
-        code = re.sub(r"^```(html)?\n?", "", code)
-        code = re.sub(r"\n?```$", "", code)
-        return code.strip()
-
-    def generate(self, prompt: str) -> tuple:
-        """
-        Website oluştur
-        Returns: (html, success, status_message)
-        """
+    def generate(self, prompt: str):
+        """Returns (html, success: bool, status: str)"""
         self.logs = []
         self.used_models = []
         self.total_tokens = 0
-        
-        self._log("🚀 Start", f"Generating: {prompt[:50]}...")
-        
-        # ===== 1. Download Images =====
+
         images = self._download_images()
-        images_html = "\n".join([
-            f'<img src="{img}" alt="resim" style="width:100%;border-radius:10px;margin:20px 0;">'
-            for img in images[:2]
-        ])
-        
-        # ===== 2. Nemotron - Plan =====
-        self._log("🧠 Nemotron", "Planning...")
-        
-        plan_prompt = f"""Kullanıcı istiyor: "{prompt}"
+        images_html = "\n".join(
+            f'<img src="{img}" alt="gorsel" style="width:100%;border-radius:12px;margin:16px 0;">'
+            for img in images
+        )
 
-Kısa plan (3 madde):
-1. Tip
-2. Ana özellikler
-3. Tasarım
-
-Markdown YOKTUR."""
-        
-        plan, plan_ok, _ = self._call_ai(
+        # 1) Plan - Nemotron
+        self._log("🧠 Nemotron", "Plan hazirlaniyor...")
+        plan, ok = self._call(
             "nemotron",
-            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-            plan_prompt,
-            400
+            f'Kullanici istegi: "{prompt}"\n\nKisa bir plan yaz (site tipi, ana sayfalar, tasarim stili). '
+            f"Markdown kullanma, duz metin yaz, en fazla 5 satir.",
+            max_tokens=400,
         )
-        
-        if not plan_ok:
-            self._log("⚠️ Nemotron", "Using Llama...")
-            plan, _, _ = self._call_ai(
-                "llama",
-                "meta/llama-3.3-70b-instruct",
-                plan_prompt,
-                300
+        if not ok or not plan.strip():
+            self._log("↪️ Nemotron", "Basarisiz, Llama ile devam ediliyor")
+            plan, ok = self._call(
+                "llama", f'Kullanici istegi: "{prompt}" icin kisa bir web sitesi plani yaz.', max_tokens=300
             )
-        
-        self._log("✅ Plan", "Ready")
-        
-        # ===== 3. DeepSeek - Spec =====
-        self._log("📚 DeepSeek", "Spec...")
-        
-        spec_prompt = f"""Plan: {plan}
+        if not plan.strip():
+            plan = prompt
 
-Teknik spec (3 madde):
-1. HTML yapısı
-2. CSS
-3. JS
-
-Markdown YOKTUR."""
-        
-        spec, spec_ok, _ = self._call_ai(
+        # 2) Teknik spec - DeepSeek
+        self._log("📚 DeepSeek", "Teknik detaylar...")
+        spec, ok = self._call(
             "deepseek",
-            "deepseek-ai/deepseek-v4-pro",
-            spec_prompt,
-            300
+            f"Plan:\n{plan}\n\nBu plan icin kisa teknik notlar yaz (HTML bolumleri, CSS yaklasimi, JS ihtiyaclari). "
+            f"Markdown kullanma, en fazla 5 satir.",
+            max_tokens=400,
         )
-        
-        if not spec_ok:
+        if not ok or not spec.strip():
             spec = plan
-        
-        self._log("✅ Spec", "Ready")
-        
-        # ===== 4. GLM-5.2 - Generate HTML =====
-        self._log("💻 GLM-5.2", "Generating HTML...")
-        
-        code_prompt = f"""MEDO TARZINDA WEBSITE YAP!
 
-İstek: {prompt}
+        # 3) GLM-5.2 - asil kod uretimi
+        self._log("💻 GLM-5.2", "HTML/CSS/JS uretiliyor...")
+        code_prompt = f"""Asagidaki istek icin TEK BIR HTML dosyasi uret.
 
+Istek: {prompt}
 Plan: {plan}
-Spec: {spec}
+Teknik notlar: {spec}
 
-Fotoğraflar:
+Kurallar:
+- <!DOCTYPE html> ile basla, tek dosyada HTML+CSS+JS olsun.
+- Responsive olsun (mobilde hamburger menu).
+- En az 3 bolum olsun (Anasayfa, Hakkinda, Iletisim) ve JavaScript ile aralarinda gecis yapilsin
+  (SPA mantigi, display:none/block ile).
+- Tum butonlar onclick="..." kullansin (addEventListener KULLANMA).
+- Asagidaki gorselleri uygun yerlere yerlestir:
 {images_html}
+- Sadece HTML kodu dondur, baska aciklama yazma.
+"""
+        raw, ok = self._call("glm", code_prompt, max_tokens=6000, temperature=0.6)
+        code = self._extract_html(raw)
 
-KURALLAR:
-1. <!DOCTYPE html> ile başla
-2. Responsive + Mobile menü
-3. 3 sayfa: Home, About, Contact
-4. onclick button'lar
-5. Modern CSS
-6. Fotoğraflar ekli
+        if not code or "<html" not in code.lower():
+            self._log("↪️ GLM-5.2", "Gecerli HTML donmedi, DeepSeek deneniyor...")
+            raw, ok = self._call("deepseek", code_prompt, max_tokens=6000, temperature=0.6)
+            code = self._extract_html(raw)
 
-SADECE HTML!"""
-        
-        code, code_ok, code_tokens = self._call_ai(
-            "glm",
-            "z-ai/glm-5.2",
-            code_prompt,
-            6000
-        )
-        
-        # Fallback chain
-        if not code_ok or len(code) < 500:
-            self._log("⚠️ GLM", "Fallback to DeepSeek...")
-            code, code_ok, code_tokens = self._call_ai(
-                "deepseek",
-                "deepseek-ai/deepseek-v4-pro",
-                code_prompt,
-                5000
-            )
-        
-        if not code_ok or len(code) < 500:
-            self._log("⚠️ DeepSeek", "Fallback to Llama...")
-            code, code_ok, code_tokens = self._call_ai(
-                "llama",
-                "meta/llama-3.3-70b-instruct",
-                code_prompt,
-                4000
-            )
-        
-        self._log("✅ Generation", "Complete")
-        
-        # ===== 5. Clean & Validate =====
-        code = self._clean_html(code)
-        
-        if not self._validate_html(code):
-            self._log("⚠️ Validation", "Invalid, using fallback...")
-            code = self._fallback_html(prompt, images_html)
-        
-        # ===== 6. GPT-OSS QA (Full code - not truncated) =====
-        self._log("🔍 GPT-OSS", "QA checking...")
-        
-        qa_prompt = f"""Bu HTML'i kontrol et:
+        if not code or "<html" not in code.lower():
+            self._log("↪️ DeepSeek", "Gecerli HTML donmedi, Llama deneniyor...")
+            raw, ok = self._call("llama", code_prompt, max_tokens=4000, temperature=0.6)
+            code = self._extract_html(raw)
+
+        # 4) GPT-OSS QA - TAM kodu goruyor (onceki versiyonda ilk 2000 karakterle sinirliydi, bu HATAYDI)
+        if code and "<html" in code.lower():
+            self._log("🔍 GPT-OSS", "Kalite kontrolu...")
+            qa_prompt = f"""Bu HTML kodunu incele. <!DOCTYPE, responsive tasarim, onclick butonlar ve JS
+fonksiyonlarinin calisir oldugundan emin ol. Sorun varsa duzelt, sorun yoksa aynen geri dondur.
+Sadece HTML dondur, aciklama yazma.
 
 {code}
+"""
+            reviewed_raw, ok = self._call("gpt_oss", qa_prompt, max_tokens=6500, temperature=0.3)
+            reviewed = self._extract_html(reviewed_raw)
+            if reviewed and "<html" in reviewed.lower() and len(reviewed) > 300:
+                code = reviewed
+                self._log("✅ GPT-OSS", "Kontrol tamam, kod guncellendi")
+            else:
+                self._log("⚠️ GPT-OSS", "QA cevabi gecersizdi, onceki kod korundu")
 
-Kontrol:
-1. <!DOCTYPE var mı?
-2. Responsive mi?
-3. Menü var mı?
-4. onclick button'lar var mı?
-
-Sorun varsa düzelt. SADECE HTML!"""
-        
-        reviewed, qa_ok, qa_tokens = self._call_ai(
-            "gpt_oss",
-            "openai/gpt-oss-120b",
-            qa_prompt,
-            5000
-        )
-        
-        if qa_ok and len(reviewed) > 500 and ("<!DOCTYPE" in reviewed or "<html" in reviewed):
-            code = reviewed
-            self._log("✅ QA", "Code fixed")
-        else:
-            self._log("✅ QA", "Code acceptable")
-        
-        # ===== Final =====
-        success = self._validate_html(code)
-        
-        if success:
-            self._log("✅ DONE", "Website ready!")
+        # 5) Son kontrol
+        if code and "<html" in code.lower():
+            if "<!DOCTYPE" not in code[:20].upper():
+                code = "<!DOCTYPE html>\n" + code
+            self._log("✅ Tamamlandi", "Website hazir")
             return code, True, "SUCCESS"
-        else:
-            self._log("⚠️ FALLBACK", "Using template...")
-            return self._fallback_html(prompt, images_html), True, "FALLBACK"
 
-    def _fallback_html(self, title: str, images: str) -> str:
-        """Fallback HTML Template"""
+        self._log("⚠️ Tum modeller basarisiz oldu", "Sablon (fallback) kullaniliyor - yukaridaki hatalara bak")
+        return self._fallback_html(prompt, images_html), False, "FALLBACK"
+
+    @staticmethod
+    def _fallback_html(title: str, images_html: str) -> str:
+        safe_title = title[:60]
         return f"""<!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title[:50]}</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: Arial; background: #f5f5f5; }}
-        header {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 30px; text-align: center; }}
-        nav {{ background: #333; padding: 15px; text-align: center; }}
-        nav a {{ color: white; margin: 0 15px; text-decoration: none; cursor: pointer; }}
-        nav a:hover {{ color: #667eea; }}
-        .container {{ max-width: 1200px; margin: 0 auto; padding: 30px; }}
-        .page {{ display: none; }}
-        .page.active {{ display: block; }}
-        h2 {{ color: #667eea; margin: 20px 0; }}
-        footer {{ background: #333; color: white; text-align: center; padding: 20px; margin-top: 40px; }}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{safe_title}</title>
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ font-family: Arial, sans-serif; background:#f5f5f5; }}
+header {{ background:linear-gradient(135deg,#667eea,#764ba2); color:#fff; padding:32px 20px; text-align:center; }}
+nav {{ background:#222; padding:14px; text-align:center; }}
+nav a {{ color:#fff; margin:0 14px; text-decoration:none; cursor:pointer; font-weight:600; }}
+nav a:hover {{ color:#a5b4fc; }}
+main {{ max-width:1000px; margin:0 auto; padding:30px 20px; }}
+.page {{ display:none; }}
+.page.active {{ display:block; }}
+h2 {{ color:#4c51bf; margin-bottom:14px; }}
+footer {{ text-align:center; padding:20px; color:#666; margin-top:30px; }}
+</style>
 </head>
 <body>
-    <header><h1>{title}</h1></header>
-    <nav>
-        <a onclick="show('home')">Anasayfa</a>
-        <a onclick="show('about')">Hakkında</a>
-        <a onclick="show('contact')">İletişim</a>
-    </nav>
-    <div class="container">
-        <div id="home" class="page active">
-            <h2>Hoş Geldiniz</h2>
-            {images}
-        </div>
-        <div id="about" class="page">
-            <h2>Hakkında</h2>
-            {images}
-        </div>
-        <div id="contact" class="page">
-            <h2>İletişim</h2>
-            {images}
-        </div>
-    </div>
-    <footer><p>&copy; 2024 FOSTAS</p></footer>
-    <script>
-        function show(id) {{
-            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            document.getElementById(id).classList.add('active');
-        }}
-    </script>
+<header><h1>{safe_title}</h1></header>
+<nav>
+<a onclick="show('home')">Anasayfa</a>
+<a onclick="show('about')">Hakkinda</a>
+<a onclick="show('contact')">Iletisim</a>
+</nav>
+<main>
+<div id="home" class="page active"><h2>Hos Geldiniz</h2><p>{safe_title}</p>{images_html}</div>
+<div id="about" class="page"><h2>Hakkinda</h2><p>Bu site FOSTAS tarafindan otomatik olarak olusturuldu.</p></div>
+<div id="contact" class="page"><h2>Iletisim</h2><p>Email: info@example.com</p></div>
+</main>
+<footer>&copy; 2026 FOSTAS</footer>
+<script>
+function show(id){{
+  document.querySelectorAll('.page').forEach(function(p){{p.classList.remove('active');}});
+  document.getElementById(id).classList.add('active');
+}}
+</script>
 </body>
 </html>"""
